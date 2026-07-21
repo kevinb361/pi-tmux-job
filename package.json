@@ -1,0 +1,49 @@
+{
+  "name": "pi-tmux-job",
+  "version": "1.0.0",
+  "description": "Observable long-running command execution in tmux panes for Pi coding agent",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-coding-agent",
+    "tmux",
+    "agent-tools"
+  ],
+  "files": [
+    "index.ts",
+    "job-manager.ts",
+    "extension-manifest.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kevinb361/pi-tmux-job.git"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bash scripts/test-in-tmux.sh",
+    "check": "npm run typecheck && npm test && npm audit --omit=dev"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.81.1",
+    "@earendil-works/pi-coding-agent": "0.81.1",
+    "@types/node": "^24.0.0",
+    "typebox": "1.1.38",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

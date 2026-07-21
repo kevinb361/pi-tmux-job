@@ -1,0 +1,15 @@
+{
+  "id": "tmux-job",
+  "name": "tmux Job Runner",
+  "version": "1.0.0",
+  "description": "Runs observable long-lived commands in Pi-owned tmux panes.",
+  "tier": "community",
+  "requires": {
+    "platform": ">=0.80.0"
+  },
+  "provides": {
+    "tools": [
+      "tmux_job"
+    ]
+  }
+}
