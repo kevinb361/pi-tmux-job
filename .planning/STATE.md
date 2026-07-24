@@ -3,9 +3,9 @@ saga_state_version: 1.0
 milestone: v1.2-log-resilience
 milestone_name: Log resilience
 status: complete
-stopped_at: v1.2 closed after independent audit PASS; release pending
-last_updated: "2026-07-24T16:30:02Z"
-last_activity: 2026-07-24 — Independent frontier audit passed with REQ-011/012 PROVEN; v1.2 is release-ready.
+stopped_at: v1.2.0 released and installed; no active milestone
+last_updated: "2026-07-24T16:33:17Z"
+last_activity: 2026-07-24 — Released v1.2.0 at 0472cc1 after a real continuously capped tmux smoke passed.
 ---
 
 # Session State
@@ -13,7 +13,7 @@ last_activity: 2026-07-24 — Independent frontier audit passed with REQ-011/012
 ## Current Position
 Phase/Milestone: v1.2-log-resilience
 Status: complete
-Last activity: 2026-07-24 — Independent frontier audit passed with REQ-011/012 PROVEN; v1.2 is release-ready.
+Last activity: 2026-07-24 — Released v1.2.0 at 0472cc1 after a real continuously capped tmux smoke passed.
 
 ## Active Work
 
