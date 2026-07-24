@@ -3,9 +3,9 @@ saga_state_version: 1.0
 milestone: v1.2.1-tail-verification
 milestone_name: Tail verification
 status: complete
-stopped_at: v1.2.1 closed after independent audit PASS; commit and release pending
-last_updated: "2026-07-24T19:03:50Z"
-last_activity: 2026-07-24 — Independent frontier audit passed with REQ-013 PROVEN; v1.2.1 is release-ready.
+stopped_at: v1.2.1 released and installed; no active milestone
+last_updated: "2026-07-24T19:06:34Z"
+last_activity: 2026-07-24 — Released v1.2.1 at 63ec74b after independent audit and fresh full gate passed.
 ---
 
 # Session State
@@ -13,7 +13,7 @@ last_activity: 2026-07-24 — Independent frontier audit passed with REQ-013 PRO
 ## Current Position
 Phase/Milestone: v1.2.1-tail-verification
 Status: complete
-Last activity: 2026-07-24 — Independent frontier audit passed with REQ-013 PROVEN; v1.2.1 is release-ready.
+Last activity: 2026-07-24 — Released v1.2.1 at 63ec74b after independent audit and fresh full gate passed.
 
 ## Active Work
 
