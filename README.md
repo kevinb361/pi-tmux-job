@@ -166,7 +166,7 @@ npm install
 npm run check
 ```
 
-The integration tests create harmless short-lived panes and verify start, duplicate-name rejection, waiting, output capture, input, interruption, cleanup, continuously bounded logging, truncation reporting, package installation, and agent lifecycle behavior. When not already inside tmux, the test harness creates and removes a temporary tmux session.
+The integration tests create harmless short-lived panes and verify start, duplicate-name rejection, waiting, output capture, input, interruption, cleanup, continuously bounded logging, truncation reporting, package installation, agent lifecycle behavior, exactly-once completion delivery into a real Pi AgentSession follow-up turn, and reload suppression of late notifications. When not already inside tmux, the test harness creates and removes a temporary tmux session.
 
 `npm run check` audits the production package surface with `npm audit --omit=dev`. The Pi SDK packages are peer/dev dependencies used for typing and tests, not shipped runtime dependencies; assess any full-tree audit findings against the pinned upstream Pi SDK separately.
 
