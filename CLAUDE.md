@@ -19,6 +19,7 @@ completion-notifier.ts   Session-scoped dispatch completion messages
 job-manager.ts           Tmux pane lifecycle, state, input, and durable job records
 log-writer.mjs           Streaming unlimited or operator-capped terminal-log sink
 model-registry.ts        Exact Pi provider/model discovery and validation
+workspace-manager.ts      Git/worktree identity, allocation, ownership, and cleanup policy
 test-manager.mjs         Tmux lifecycle integration tests
 test-live-notification.mjs Real Pi AgentSession completion-delivery integration test
 test-extension.mjs       Pi discovery and real tool invocation test

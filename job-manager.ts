@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { WORKSPACE_INTENTS, WORKSPACE_MODES, type JobWorkspaceMetadata } from "./workspace-manager.ts";
 
 export interface ExecResult {
 	stdout: string;
@@ -29,6 +30,7 @@ export interface TmuxPaneJob {
 	state: string;
 	maxLogBytes: number;
 	logTruncated: boolean;
+	workspace?: JobWorkspaceMetadata;
 	exitCode?: number;
 }
 
@@ -38,6 +40,7 @@ export interface StartJobOptions {
 	cwd: string;
 	windowName?: string;
 	input?: string;
+	workspace?: JobWorkspaceMetadata;
 	signal?: AbortSignal;
 }
 
@@ -89,21 +92,62 @@ async function readOptional(path: string): Promise<string | undefined> {
 	}
 }
 
-async function readMaxLogBytes(directory: string): Promise<number> {
+function parseWorkspaceMetadata(value: unknown, path: string): JobWorkspaceMetadata | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "object" || value === null) throw new Error(`Invalid workspace in job metadata at ${path}`);
+	const workspace = value as Record<string, unknown>;
+	if (
+		!WORKSPACE_INTENTS.includes(workspace.intent as (typeof WORKSPACE_INTENTS)[number]) ||
+		!WORKSPACE_MODES.includes(workspace.mode as (typeof WORKSPACE_MODES)[number]) ||
+		!["current", "managed"].includes(workspace.kind as string) ||
+		typeof workspace.requestedCwd !== "string" ||
+		typeof workspace.isGit !== "boolean"
+	) {
+		throw new Error(`Invalid workspace in job metadata at ${path}`);
+	}
+	if (workspace.kind === "managed") {
+		if (
+			typeof workspace.managedId !== "string" ||
+			typeof workspace.ownerRecordPath !== "string" ||
+			typeof workspace.createdBranch !== "string" ||
+			typeof workspace.baseRevision !== "string"
+		) {
+			throw new Error(`Invalid managed workspace in job metadata at ${path}`);
+		}
+	}
+	if (workspace.isGit) {
+		if (
+			typeof workspace.repositoryRoot !== "string" ||
+			typeof workspace.worktreeRoot !== "string" ||
+			typeof workspace.revision !== "string" ||
+			typeof workspace.detached !== "boolean" ||
+			typeof workspace.dirty !== "boolean" ||
+			(workspace.branch !== undefined && typeof workspace.branch !== "string")
+		) {
+			throw new Error(`Invalid Git workspace in job metadata at ${path}`);
+		}
+	}
+	return workspace as unknown as JobWorkspaceMetadata;
+}
+
+async function readJobMetadata(
+	directory: string,
+): Promise<{ maxLogBytes: number; workspace?: JobWorkspaceMetadata }> {
 	const path = resolve(directory, "metadata.json");
 	const raw = await readOptional(path);
-	if (raw === undefined) return 0;
+	if (raw === undefined) return { maxLogBytes: 0 };
 	let metadata: unknown;
 	try {
 		metadata = JSON.parse(raw);
 	} catch (error) {
 		throw new Error(`Invalid job metadata at ${path}: ${error instanceof Error ? error.message : String(error)}`);
 	}
-	const value = (metadata as { maxLogBytes?: unknown }).maxLogBytes ?? 0;
-	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+	const record = metadata as { maxLogBytes?: unknown; workspace?: unknown };
+	const maxLogBytes = record.maxLogBytes ?? 0;
+	if (typeof maxLogBytes !== "number" || !Number.isSafeInteger(maxLogBytes) || maxLogBytes < 0) {
 		throw new Error(`Invalid maxLogBytes in job metadata at ${path}`);
 	}
-	return value;
+	return { maxLogBytes, workspace: parseWorkspaceMetadata(record.workspace, path) };
 }
 
 function runnerScript(
@@ -250,7 +294,7 @@ export class TmuxJobManager {
 			if (rowSession !== sessionId || !id || !directory) continue;
 			const state = (await readOptional(resolve(directory, "state"))) ?? "unknown";
 			const rawExit = await readOptional(resolve(directory, "exit-code"));
-			const maxLogBytes = await readMaxLogBytes(directory);
+			const metadata = await readJobMetadata(directory);
 			const logTruncated = (await readOptional(resolve(directory, "log-truncated"))) === "true";
 			jobs.push({
 				sessionId: rowSession,
@@ -262,8 +306,9 @@ export class TmuxJobManager {
 				name,
 				directory,
 				state,
-				maxLogBytes,
+				maxLogBytes: metadata.maxLogBytes,
 				logTruncated,
+				workspace: metadata.workspace,
 				exitCode: rawExit === undefined ? undefined : parseExitCode(rawExit),
 			});
 		}
@@ -315,7 +360,19 @@ export class TmuxJobManager {
 		await writeFile(statePath, "launching\n", { mode: 0o600 });
 		await writeFile(
 			resolve(directory, "metadata.json"),
-			`${JSON.stringify({ id, name: options.name, cwd, windowName, maxLogBytes, createdAt: new Date().toISOString() }, null, 2)}\n`,
+			`${JSON.stringify(
+				{
+					id,
+					name: options.name,
+					cwd,
+					windowName,
+					maxLogBytes,
+					workspace: options.workspace,
+					createdAt: new Date().toISOString(),
+				},
+				null,
+				2,
+			)}\n`,
 			{ mode: 0o600 },
 		);
 

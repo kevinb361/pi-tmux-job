@@ -18,8 +18,27 @@ import {
 import { DispatchCompletionNotifier } from "./completion-notifier.ts";
 import { TmuxJobManager, type TmuxPaneJob } from "./job-manager.ts";
 import { validatePiModel } from "./model-registry.ts";
+import {
+	WORKSPACE_INTENTS,
+	WORKSPACE_MODES,
+	ManagedWorkspaceManager,
+	WorkspaceAllocator,
+	decideWorkspace,
+	describeWorkspace,
+	inspectWorkspace,
+} from "./workspace-manager.ts";
 
-const ACTIONS = ["start", "list", "status", "tail", "wait", "send", "interrupt", "close"] as const;
+const ACTIONS = [
+	"start",
+	"list",
+	"status",
+	"tail",
+	"wait",
+	"send",
+	"interrupt",
+	"close",
+	"cleanup-workspace",
+] as const;
 
 function describeJob(job: TmuxPaneJob): string {
 	const exit = job.exitCode === undefined ? "-" : String(job.exitCode);
@@ -31,7 +50,7 @@ function describeJob(job: TmuxPaneJob): string {
 				: `capped:${job.maxLogBytes}`;
 	return (
 		`${job.name} id=${job.id} pane=${job.paneId} state=${job.state} exit=${exit} ` +
-		`window=${job.windowId} log=${retention}`
+		`window=${job.windowId} log=${retention}${describeWorkspace(job.workspace)}`
 	);
 }
 
@@ -71,6 +90,8 @@ export default function (pi: ExtensionAPI) {
 	const exec = (command: string, args: string[], options?: Parameters<typeof pi.exec>[2]) =>
 		pi.exec(command, args, options);
 	const manager = new TmuxJobManager(exec);
+	const workspaceAllocator = new WorkspaceAllocator();
+	const managedWorkspaces = new ManagedWorkspaceManager(exec);
 	const notifier = new DispatchCompletionNotifier(manager, (message, options) => pi.sendMessage(message, options));
 	pi.on("session_shutdown", () => notifier.shutdown());
 
@@ -80,15 +101,16 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Run and manage observable commands in Pi-owned panes in a dedicated tmux window. " +
 			"Use start for long-running or user-visible commands, list/status/tail/wait to monitor them, " +
-			"send for interactive input, interrupt for Ctrl-C, and close to remove a pane. " +
+			"send for interactive input, interrupt for Ctrl-C, close to remove a pane, and cleanup-workspace for owned agent worktrees. " +
 			"start requires name and command. All actions except start/list require target (job name, id, or pane id). " +
-			"send requires text. close refuses running jobs unless force=true. Output is limited to 50KB/2000 lines.",
+			"send requires text. close refuses running jobs unless force=true. cleanup-workspace refuses running, non-managed, or unowned workspaces and preserves dirty trees. Output is limited to 50KB/2000 lines.",
 		promptSnippet: "Run and monitor long-lived commands in visible Pi-owned tmux panes",
 		promptGuidelines: [
 			"Use tmux_job instead of background bash when a command is long-running, interactive, or the user asks to watch it live.",
 			"Use normal bash for short commands; do not create tmux panes for routine listings or quick checks unless the user explicitly requests it.",
 			"tmux_job provides execution and visibility, not authorization; preserve all production, migration, and destructive-operation approval gates.",
 			"Do not launch concurrent tmux_job commands that edit the same shared repository files; prepare shared state serially before parallel execution.",
+			"Use cleanup-workspace only after inspecting and waiting for a managed tmux_agent job; dirty worktrees and committed branches are intentionally preserved.",
 		],
 		parameters: Type.Object({
 			action: StringEnum(ACTIONS, { description: "Job operation" }),
@@ -228,6 +250,43 @@ export default function (pi: ExtensionAPI) {
 						details: { job },
 					};
 				}
+				case "cleanup-workspace": {
+					const target = requireParameter(params.target, "target");
+					const job = await manager.resolve(target, signal);
+					if (!job) throw new Error(`No Pi-owned tmux job found for target: ${target}`);
+					if (["launching", "running"].includes(job.state)) {
+						throw new Error(`Refusing workspace cleanup while job ${job.name} is ${job.state}`);
+					}
+					const cleanup = await managedWorkspaces.cleanup(job.workspace, signal);
+					if (!cleanup.removed) {
+						return {
+							content: [
+								{
+									type: "text",
+									text:
+										`Preserved dirty managed workspace for ${job.name}: ${cleanup.worktreePath}\n` +
+										`Branch retained: ${cleanup.branch}. Inspect, commit, or clean it before retrying cleanup.`,
+								},
+							],
+							details: { job, cleanup },
+						};
+					}
+					const branchResult = cleanup.branchDeleted
+						? `Deleted unchanged extension branch ${cleanup.branch}.`
+						: `Retained committed branch ${cleanup.branch}.`;
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`${cleanup.alreadyRemoved ? "Managed workspace was already removed" : "Removed managed workspace"} ` +
+									`for ${job.name}: ${cleanup.worktreePath}\n${branchResult} ` +
+									`Pane ${job.paneId} remains available for inspection; close it explicitly when done.`,
+							},
+						],
+						details: { job, cleanup },
+					};
+				}
 			}
 		},
 	});
@@ -238,18 +297,30 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Launch Pi, Claude Code, or Hermes as an observable child agent in a Pi-owned tmux pane. " +
 			"dispatch requires a prompt and returns immediately; interactive starts the native CLI for direct use. " +
+			"intent declares read-only or writer behavior and defaults conservatively to write; workspace defaults to auto. " +
 			"Pi and Claude prompts use private stdin transport; Hermes one-shot mode exposes its prompt in argv and auto-bypasses approvals. " +
 			"Use tmux_job with the returned name or pane id to inspect, send input, interrupt, wait, or close.",
 		promptSnippet: "Launch observable Pi, Claude Code, or Hermes child agents in tmux panes",
 		promptGuidelines: [
 			"Use tmux_agent when delegating a bounded task to Pi, Claude Code, or Hermes and tmux_job to manage the resulting pane.",
-			"Do not launch concurrent writer agents against the same working tree.",
+			"Declare intent=read only when the child task is guaranteed not to mutate its workspace; omitted intent defaults to write.",
+			"Use workspace=auto by default. workspace=current explicitly accepts a dirty or occupied tree and requires operator-approved context; workspace=worktree requests isolation.",
 			"Agent launch visibility does not replace approval for production, destructive, migration, or network changes.",
 		],
 		parameters: Type.Object({
 			backend: StringEnum(AGENT_BACKENDS, { description: "Child-agent CLI" }),
 			mode: Type.Optional(
 				StringEnum(AGENT_MODES, { description: "dispatch (default) or interactive native CLI" }),
+			),
+			intent: Type.Optional(
+				StringEnum(WORKSPACE_INTENTS, {
+					description: "Workspace intent; read is non-mutating, write is conservative default",
+				}),
+			),
+			workspace: Type.Optional(
+				StringEnum(WORKSPACE_MODES, {
+					description: "Workspace allocation: auto (default), explicit current tree, or managed worktree",
+				}),
 			),
 			name: Type.String({ description: "Unique safe pane/job name" }),
 			prompt: Type.Optional(Type.String({ description: "Task prompt; required for dispatch" })),
@@ -278,14 +349,34 @@ export default function (pi: ExtensionAPI) {
 				params.backend === "pi" && params.model !== undefined
 					? await validatePiModel(exec, agentExecutable("pi"), params.model, signal)
 					: undefined;
-			const job = await manager.start({
-				name: params.name,
-				command: buildAgentCommand(params.backend, mode, { model, thinking: params.thinking }),
-				cwd: resolve(ctx.cwd, params.cwd ?? "."),
-				windowName: params.window,
-				input: mode === "dispatch" ? params.prompt : undefined,
-				signal,
+			const cwd = resolve(ctx.cwd, params.cwd ?? ".");
+			const intent = params.intent ?? "write";
+			const workspaceMode = params.workspace ?? "auto";
+			const allocated = await workspaceAllocator.run(async () => {
+				const inspected = await inspectWorkspace(exec, cwd, intent, workspaceMode, signal);
+				const decision = decideWorkspace(inspected, await manager.list(signal));
+				const managed =
+					decision.kind === "managed"
+						? await managedWorkspaces.create(inspected, params.name, signal)
+						: undefined;
+				const workspace = managed?.workspace ?? inspected;
+				try {
+					const job = await manager.start({
+						name: params.name,
+						command: buildAgentCommand(params.backend, mode, { model, thinking: params.thinking }),
+						cwd: managed?.cwd ?? cwd,
+						windowName: params.window,
+						input: mode === "dispatch" ? params.prompt : undefined,
+						workspace,
+						signal,
+					});
+					return { job, workspace, decision };
+				} catch (error) {
+					if (managed) return managedWorkspaces.rollback(managed, error);
+					throw error;
+				}
 			});
+			const { job, workspace, decision } = allocated;
 			if (mode === "dispatch") notifier.watch(job, params.backend);
 			const warning =
 				params.backend === "hermes" && mode === "dispatch"
@@ -301,7 +392,17 @@ export default function (pi: ExtensionAPI) {
 							`Use tmux_job with ${job.name} or ${job.paneId} for lifecycle controls.${warning}`,
 					},
 				],
-				details: { job, backend: params.backend, mode, model, thinking: params.thinking },
+				details: {
+					job,
+					backend: params.backend,
+					mode,
+					model,
+					thinking: params.thinking,
+					intent,
+					workspace,
+					workspaceMode,
+					workspaceDecision: decision,
+				},
 			};
 		},
 	});

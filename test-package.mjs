@@ -29,6 +29,7 @@ try {
 		"job-manager.ts",
 		"log-writer.mjs",
 		"model-registry.ts",
+		"workspace-manager.ts",
 		"extension-manifest.json",
 		"README.md",
 	]) {
@@ -62,7 +63,7 @@ try {
 	const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 	const manifest = JSON.parse(await readFile(join(packageRoot, "extension-manifest.json"), "utf8"));
 	const readme = await readFile(join(packageRoot, "README.md"), "utf8");
-	assert.equal(packageJson.version, "1.2.2");
+	assert.equal(packageJson.version, "1.3.0");
 	assert.deepEqual(packageJson.pi.extensions, ["./index.ts"]);
 	assert.equal(manifest.version, packageJson.version);
 	assert.deepEqual(manifest.provides.tools, ["tmux_job", "tmux_agent"]);
@@ -74,6 +75,12 @@ try {
 		/normal configuration, rules, memory, skills, and plugins/,
 		/Hermes exception/,
 		/old session's watcher is cancelled/,
+		/PI_TMUX_WORKTREE_ROOT/,
+		/workspace=current/,
+		/Concurrent writers receive separate managed Git worktrees/,
+		/cleanup-workspace/,
+		/preserves dirty worktrees and branches containing commits/,
+		/no force\/destructive override/,
 		/## Non-goals/,
 	]) {
 		assert.match(readme, documented);
@@ -86,6 +93,14 @@ try {
 	assert.ok(extension, "installed extension was not discovered");
 	assert.ok(extension.tools.has("tmux_job"));
 	assert.ok(extension.tools.has("tmux_agent"));
+	assert.ok(
+		extension.tools.get("tmux_job").definition.parameters.properties.action.enum.includes("cleanup-workspace"),
+	);
+	assert.deepEqual(extension.tools.get("tmux_agent").definition.parameters.properties.workspace.enum, [
+		"auto",
+		"current",
+		"worktree",
+	]);
 } finally {
 	await rm(root, { recursive: true, force: true });
 }

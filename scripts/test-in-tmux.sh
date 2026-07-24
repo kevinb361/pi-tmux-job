@@ -7,6 +7,7 @@ run_tests() {
   node --no-warnings --experimental-transform-types "$repo_dir/test-manager.mjs"
   node --no-warnings --experimental-transform-types "$repo_dir/test-hermes-config.mjs"
   node --no-warnings --experimental-transform-types "$repo_dir/test-log-writer.mjs"
+  node --no-warnings --experimental-transform-types "$repo_dir/test-workspace.mjs"
   node --no-warnings --experimental-transform-types "$repo_dir/test-notifier.mjs"
   node --no-warnings --experimental-transform-types "$repo_dir/test-live-notification.mjs"
   node --no-warnings --experimental-transform-types "$repo_dir/test-package.mjs"

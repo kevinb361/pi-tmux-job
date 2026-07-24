@@ -59,6 +59,7 @@ Supported actions:
 | `send` | Send literal input and optionally press Enter |
 | `interrupt` | Send Ctrl-C |
 | `close` | Close a completed pane; running jobs require `force=true` |
+| `cleanup-workspace` | Safely remove a stopped agent job's verified managed worktree; no force override |
 
 Jobs are addressed by name, generated ID, or tmux pane ID. The default window is `pi-jobs`; callers can select another safe window name.
 
@@ -70,6 +71,8 @@ Jobs are addressed by name, generated ID, or tmux pane ID. The default window is
 |---|---|
 | `backend` | Required: `pi`, `claude`, or `hermes` |
 | `mode` | `dispatch` (default) or `interactive` |
+| `intent` | `write` (conservative default) or guaranteed non-mutating `read` |
+| `workspace` | `auto` (default), explicit `current`, or isolated `worktree` |
 | `name` | Required unique safe job name |
 | `prompt` | Required for dispatch; rejected for interactive mode |
 | `model` | Exact Pi `provider/model`; valid only with `backend: pi` |
@@ -80,6 +83,35 @@ Jobs are addressed by name, generated ID, or tmux pane ID. The default window is
 Dispatch returns immediately and sends one bounded completion message back to the originating live Pi session. Jobs continue in tmux if Pi reloads or exits, but the old session's watcher is cancelled. Interactive mode starts the native CLI without an initial prompt; use `tmux_job send` or take over the pane directly.
 
 Pi model selection is validated against the live output of `pi --list-models` before launch. Use exact identifiers, for example `openai-codex/gpt-5.6-sol`, `litellm/deep`, `litellm/deep-think`, or `litellm/fast`. GPT and local LiteLLM models run through the Pi harness; this package does not launch Codex CLI.
+
+### Workspace safety
+
+Every agent launch records and reports its repository, worktree, branch or detached revision, dirtiness, allocation mode, and read/write intent. `workspace=auto` applies these rules under a serialized allocator:
+
+- Guaranteed read-only jobs may share the requested tree.
+- A sole writer may use a clean, unoccupied requested tree.
+- Concurrent writers receive separate managed Git worktrees.
+- Dirty or ambiguous writer targets fail closed; `workspace=current` is the explicit operator override.
+- `workspace=worktree` explicitly requests managed isolation.
+- Concurrent writers in one non-Git directory fail closed because Git isolation is unavailable.
+
+Managed worktrees start at the requested tree's exact `HEAD`; uncommitted source changes are never copied or discarded. Collision-safe `pi-tmux/*` branches, worktrees, and external ownership records are stored under `~/.pi/agent/tmux-worktrees/` by default. Operators can relocate that root before Pi starts:
+
+```bash
+export PI_TMUX_WORKTREE_ROOT=/operator/controlled/path
+```
+
+The LLM-callable tool cannot override that location. After a managed job stops, inspect its work and run `tmux_job cleanup-workspace`. Cleanup:
+
+- refuses running, unowned, missing/mismatched-ownership, and outside-root targets;
+- preserves dirty worktrees and branches containing commits;
+- removes only verified clean extension-owned worktrees;
+- atomically deletes only extension-created branches still at their original revision;
+- is idempotent and has no force/destructive override.
+
+Cleanup leaves the stopped pane available for inspection; close it explicitly afterward. If a branch contains useful commits, cleanup removes the worktree but reports and retains the branch for normal review or merge.
+
+### Backend configuration
 
 Each backend otherwise retains its native configuration. In particular, Hermes continues to load the operator's normal configuration, rules, memory, skills, and plugins. Override executable paths when needed:
 
@@ -115,6 +147,10 @@ Launch Claude Code interactively in a pane named claude-debug, then show me how 
 Dispatch Hermes as hermes-docs to review the README. I accept Hermes one-shot approval bypass and argv prompt exposure.
 ```
 
+```text
+Dispatch two writer agents with workspace=auto. Keep their changes isolated, show me each branch, and do not clean either workspace until I approve the results.
+```
+
 ## Behavior
 
 - Panes are created detached, so Pi retains focus.
@@ -130,7 +166,8 @@ Dispatch Hermes as hermes-docs to review the README. I accept Hermes one-shot ap
 ~/.pi/agent/tmux-jobs/<job-id>/
 ```
 
-- `close` removes the pane but intentionally retains those records.
+- `close` removes the pane but intentionally retains those records and does not implicitly delete a managed workspace.
+- Managed workspace ownership records remain outside the worktree; successful cleanup leaves a small removal tombstone for idempotence and auditability.
 - Only panes tagged by this extension can be managed through the tool.
 - Output returned to the model is bounded to Pi's 50KB/2000-line limits.
 
@@ -140,6 +177,8 @@ Dispatch Hermes as hermes-docs to review the README. I accept Hermes one-shot ap
 - **Executable unavailable:** install the selected CLI or set its `PI_TMUX_AGENT_*_BIN` override.
 - **Model rejected:** run `pi --list-models` and pass an exact `provider/model`; unqualified or ambiguous names are rejected.
 - **Job name already exists:** close the existing owned pane or choose another name.
+- **Automatic writer launch refused as dirty:** commit or stash the requested tree, choose another clean worktree, or explicitly use `workspace=current` only when sharing that exact dirty tree is intentional.
+- **Cleanup preserved a workspace:** inspect the reported path. Commit or remove dirty changes before retrying; committed branches are intentionally retained after cleanup.
 - **Dispatch survives reload without notifying:** expected—the tmux job continues, but session-scoped watchers are cancelled on reload or shutdown. Inspect it with `tmux_job list/status/wait`.
 - **Full command output needed:** read the retained `output.log` path reported by the tool; model-facing output remains bounded. If `log-truncated` exists, output before the retained chronological tail is no longer available.
 
@@ -151,13 +190,14 @@ This extension has the same command-execution authority as Pi's Bash tool. It pr
 - Agent adapters do not inject explicit permission-bypass flags and otherwise preserve each CLI's native behavior.
 - **Hermes exception:** dispatch uses native one-shot mode, which auto-bypasses Hermes approvals and transiently exposes the prompt in process argv; the tool reports this on every Hermes dispatch.
 - It refuses to close a running job unless forced.
-- It does not manage unrelated tmux panes.
-- Callers should not launch concurrent jobs that edit the same shared files.
+- It does not manage unrelated tmux panes or worktrees without matching external ownership records.
+- Automatic allocation isolates concurrent Git writers; explicit `workspace=current` deliberately accepts shared-tree risk.
+- Managed cleanup has no model-reachable force option and preserves dirty worktrees and committed branches.
 - Review third-party agent instructions before allowing them to invoke arbitrary commands.
 
 ## Non-goals
 
-This release does not provide built-in worktree creation, persistent backend session resume, workflow DAGs, hidden scheduling, an embedded terminal overlay, or a Codex CLI adapter. Callers choose `cwd` and coordinate concurrent writers explicitly.
+This release does not provide persistent backend session resume, automatic merging of managed branches, workflow DAGs, hidden scheduling, an embedded terminal overlay, or a Codex CLI adapter. Workspace isolation is local Git worktree management, not a sandbox or permission boundary.
 
 ## Development
 
@@ -166,7 +206,7 @@ npm install
 npm run check
 ```
 
-The integration tests create harmless short-lived panes and verify start, duplicate-name rejection, waiting, output capture, input, interruption, cleanup, continuously bounded logging, truncation reporting, package installation, agent lifecycle behavior, exactly-once completion delivery into a real Pi AgentSession follow-up turn, and reload suppression of late notifications. When not already inside tmux, the test harness creates and removes a temporary tmux session.
+The integration tests create harmless short-lived panes and temporary Git repositories. They verify start, duplicate-name rejection, waiting, output capture, input, interruption, continuously bounded logging, package installation, agent lifecycle behavior, workspace policy and concurrent-writer isolation, managed creation/rollback/cleanup preservation, exactly-once completion delivery into a real Pi AgentSession follow-up turn, and reload suppression of late notifications. When not already inside tmux, the test harness creates and removes a temporary tmux session.
 
 `npm run check` audits the production package surface with `npm audit --omit=dev`. The Pi SDK packages are peer/dev dependencies used for typing and tests, not shipped runtime dependencies; assess any full-tree audit findings against the pinned upstream Pi SDK separately.
 

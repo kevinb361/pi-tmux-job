@@ -203,3 +203,43 @@ PASS
 - Info: notes on the test-and-metadata-only frozen-source delta, harness wiring, the five REQ-014 clause-by-clause mechanisms, timing/failure-visibility/cleanup, and metadata/doc/regression/safety posture.
 
 v1.2.2 is closure-ready. REQ-014 is independently PROVEN: the test loads the shipped extension into a real in-memory Pi `AgentSession`, executes `tmux_agent` dispatch against a real tmux child, and asserts exactly one `tmux-agent-completion` message ingested into the follow-up model context with exactly one additional agent run and model call, plus a genuine post-`reload()`/`session_shutdown` suppression proof over a child that completes after shutdown. Production runtime behavior is unchanged (source byte-identical to HEAD), the new test is wired into and passes the fresh gate, version metadata is consistent at 1.2.2 with no stale references, structure lint is clean, and `npm audit` reports zero vulnerabilities. `saga-audit` does not flip ROADMAP/STATE; the mechanical completion step remains with the executor's `saga-run` after this PASS.
+
+---
+
+## Audit: v1.3-workspace-safety — 2026-07-24
+
+Auditor: independent Claude Code dispatch in a read-only tmux agent; authored none of the v1.3 slices.
+Scope: REQ-015 through REQ-019 plus regression safety for REQ-001 through REQ-014.
+Full report: `/tmp/pi-tmux-v1.3-audit.txt` (session artifact); durable verdict and findings are recorded below.
+
+### Evidence reproduced
+
+- `npm run check` exited 0: TypeScript, all eight tmux suites, packed install/discovery, real AgentSession completion proof, and `npm audit --omit=dev` with 0 vulnerabilities.
+- Saga lint returned `clean: true` with no findings.
+- Package, lockfile, and manifest versions are consistent at 1.3.0; `workspace-manager.ts` is present in the packed package.
+- REQ-015 through REQ-018 were independently traced to implementation and behavioral tests. REQ-019's documentation, package, regression, and no-force-override clauses were verified directly.
+
+### Safety findings
+
+- No Critical, High, or Medium findings.
+- [info] Dirty writes fail closed at policy and creation layers; concurrent writer allocation is serialized and proven to select a distinct managed worktree.
+- [info] Creation and cleanup verify external ownership and constrain cleanup targets beneath the operator root.
+- [info] Unchanged branch deletion uses atomic `git update-ref -d <ref> <expected-old-value>`; dirty worktrees and committed branches are retained.
+- [info] Cleanup is idempotent through durable tombstones and exposes no model-reachable force/destructive override.
+- [low] One malformed self-written workspace record can make `list()` fail rather than skip/quarantine only that record. This mirrors existing malformed-metadata behavior, does not affect historical records lacking workspace metadata, and is a non-blocking future hardening item.
+- [info] Read intent is declared rather than sandbox-enforced, and the allocation mutex is per extension instance. Both boundaries are documented and consistent with package scope.
+
+### Requirement verdicts
+
+- REQ-015: PASS
+- REQ-016: PASS
+- REQ-017: PASS
+- REQ-018: PASS
+- REQ-019: PASS
+- REQ-001 through REQ-014 regression sweep: PASS
+
+### Verdict
+
+PASS
+
+v1.3 is release-ready. No code change was requested by the auditor. The single Low robustness observation is deferred; it does not weaken workspace ownership, cleanup safety, or backward compatibility.
