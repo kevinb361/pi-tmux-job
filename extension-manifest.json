@@ -1,7 +1,7 @@
 {
   "id": "tmux-job",
   "name": "tmux Job and Agent Runner",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Runs observable commands and structured child agents in Pi-owned tmux panes.",
   "tier": "community",
   "requires": {

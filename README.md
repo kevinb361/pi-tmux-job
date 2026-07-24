@@ -120,9 +120,11 @@ Dispatch Hermes as hermes-docs to review the README. I accept Hermes one-shot ap
 - Panes are created detached, so Pi retains focus.
 - Jobs in the same named window are tiled automatically.
 - The initial command runs through the user's login shell with stdin, stdout, and stderr attached to a genuine tmux PTY.
-- Tmux-native pane logging preserves the full initial-command log without placing the command behind a `tee` pipeline.
+- Tmux-native pane logging keeps commands out of a `tee` pipeline. Unlimited mode preserves the full initial-command log.
+- Operators may set `PI_TMUX_JOB_MAX_LOG_BYTES` to a positive byte count to retain only the newest chronological bytes per job; unset or `0` keeps unlimited logs. Agent tools cannot override this policy.
+- When capped output discards older bytes, job status shows `log=truncated:<bytes>`, tool results include a retention warning, and the job directory contains `log-truncated`.
 - Completed panes remain open at a shell for inspection.
-- Each job records its command, metadata, state, exit code, and full initial-command log under:
+- Each job records its command, metadata, state, exit code, and retained initial-command log under:
 
 ```text
 ~/.pi/agent/tmux-jobs/<job-id>/
@@ -139,7 +141,7 @@ Dispatch Hermes as hermes-docs to review the README. I accept Hermes one-shot ap
 - **Model rejected:** run `pi --list-models` and pass an exact `provider/model`; unqualified or ambiguous names are rejected.
 - **Job name already exists:** close the existing owned pane or choose another name.
 - **Dispatch survives reload without notifying:** expected—the tmux job continues, but session-scoped watchers are cancelled on reload or shutdown. Inspect it with `tmux_job list/status/wait`.
-- **Full command output needed:** read the retained `output.log` path reported by the tool; model-facing output remains bounded.
+- **Full command output needed:** read the retained `output.log` path reported by the tool; model-facing output remains bounded. If `log-truncated` exists, output before the retained chronological tail is no longer available.
 
 ## Safety model
 
@@ -164,7 +166,7 @@ npm install
 npm run check
 ```
 
-The integration test creates harmless short-lived panes and verifies start, duplicate-name rejection, waiting, output capture, input, interruption, and cleanup. When not already inside tmux, the test harness creates and removes a temporary tmux session.
+The integration tests create harmless short-lived panes and verify start, duplicate-name rejection, waiting, output capture, input, interruption, cleanup, continuously bounded logging, truncation reporting, package installation, and agent lifecycle behavior. When not already inside tmux, the test harness creates and removes a temporary tmux session.
 
 `npm run check` audits the production package surface with `npm audit --omit=dev`. The Pi SDK packages are peer/dev dependencies used for typing and tests, not shipped runtime dependencies; assess any full-tree audit findings against the pinned upstream Pi SDK separately.
 

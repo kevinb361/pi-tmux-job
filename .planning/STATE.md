@@ -1,19 +1,19 @@
 ---
 saga_state_version: 1.0
-milestone: v1.1-agent-dispatch
-milestone_name: Agent dispatch
+milestone: v1.2-log-resilience
+milestone_name: Log resilience
 status: complete
-stopped_at: v1.1.0 released and installed; no active milestone
-last_updated: "2026-07-24T15:44:36Z"
-last_activity: 2026-07-24 — Released v1.1.0 at cc0a99a after real Pi, Claude Code, and Hermes smoke checks passed.
+stopped_at: v1.2 closed after independent audit PASS; release pending
+last_updated: "2026-07-24T16:30:02Z"
+last_activity: 2026-07-24 — Independent frontier audit passed with REQ-011/012 PROVEN; v1.2 is release-ready.
 ---
 
 # Session State
 
 ## Current Position
-Phase/Milestone: v1.1-agent-dispatch
+Phase/Milestone: v1.2-log-resilience
 Status: complete
-Last activity: 2026-07-24 — Released v1.1.0 at cc0a99a after real Pi, Claude Code, and Hermes smoke checks passed.
+Last activity: 2026-07-24 — Independent frontier audit passed with REQ-011/012 PROVEN; v1.2 is release-ready.
 
 ## Active Work
 
@@ -23,5 +23,6 @@ Last activity: 2026-07-24 — Released v1.1.0 at cc0a99a after real Pi, Claude C
 - 2026-07-24 — Persistent backend session resume and cross-run continuation.
 - 2026-07-24 — Hidden scheduling, workflow DAGs, and an embedded terminal overlay.
 - 2026-07-24 — Built-in Codex CLI adapter; GPT models run through Pi for this milestone.
-- 2026-07-24 — Consider rotation or a configurable cap for durable `output.log` files.
+- 2026-07-24 — Bounded durable logging promoted to active milestone v1.2-log-resilience.
 - 2026-07-24 — Add an end-to-end assertion for completion delivery into a live Pi turn.
+- 2026-07-24 — Add a byte-exact multi-chunk retained-tail ordering assertion.

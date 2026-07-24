@@ -1,9 +1,22 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TmuxJobManager } from "./job-manager.ts";
+
+async function retainedLogBytes(directory) {
+	try {
+		const names = (await readdir(directory)).filter((name) => name.startsWith("output.log"));
+		return (await Promise.all(names.map((name) => stat(join(directory, name))))).reduce(
+			(total, entry) => total + entry.size,
+			0,
+		);
+	} catch (error) {
+		if (error.code === "ENOENT") return 0;
+		throw error;
+	}
+}
 
 function exec(command, args, options = {}) {
 	return new Promise((resolve) => {
@@ -110,6 +123,75 @@ try {
 	assert.ok(durableLog.indexOf("req001-first") < durableLog.indexOf("req001-last"));
 	await manager.close(ttyName, false);
 	cleanupTargets.splice(cleanupTargets.indexOf(ttyJob.paneId), 1);
+
+	const previousConfiguredCap = process.env.PI_TMUX_JOB_MAX_LOG_BYTES;
+	process.env.PI_TMUX_JOB_MAX_LOG_BYTES = "4096";
+	const cappedManager = new TmuxJobManager(exec, { rootDirectory });
+	if (previousConfiguredCap === undefined) delete process.env.PI_TMUX_JOB_MAX_LOG_BYTES;
+	else process.env.PI_TMUX_JOB_MAX_LOG_BYTES = previousConfiguredCap;
+	const cappedName = `capped-${suffix}`;
+	const capped = await cappedManager.start({
+		name: cappedName,
+		command:
+			"if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then printf 'REQ012_TTY_OK\\n'; else exit 92; fi; " +
+			"for i in $(seq 1 80); do printf '%01024d\\n' \"$i\"; sleep 0.01; done; " +
+			"printf 'REQ011_NEWEST_MARKER\\n'",
+		cwd: process.cwd(),
+		windowName,
+	});
+	cleanupTargets.push(capped.paneId);
+	let runningSamples = 0;
+	for (let index = 0; index < 30; index += 1) {
+		const retainedBytes = await retainedLogBytes(capped.directory);
+		assert.ok(retainedBytes <= 4096, `retained capped logs grew to ${retainedBytes} bytes`);
+		if (retainedBytes > 0) runningSamples += 1;
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	}
+	assert.ok(runningSamples >= 3, `expected sustained running samples, observed ${runningSamples}`);
+	const cappedWaited = await cappedManager.wait(cappedName, 10);
+	assert.equal(cappedWaited.job.exitCode, 0);
+	assert.equal(cappedWaited.job.maxLogBytes, 4096);
+	assert.equal(cappedWaited.job.logTruncated, true);
+	assert.ok((await retainedLogBytes(capped.directory)) <= 4096);
+	const cappedLog = await readFile(join(capped.directory, "output.log"), "utf8");
+	assert.match(cappedLog, /REQ011_NEWEST_MARKER/);
+	assert.match(cappedLog, /\[tmux-job\] finished=.* exit=0/);
+	assert.equal(await readFile(join(capped.directory, "log-truncated"), "utf8"), "true\n");
+	const cappedMetadata = JSON.parse(await readFile(join(capped.directory, "metadata.json"), "utf8"));
+	assert.equal(cappedMetadata.maxLogBytes, 4096);
+	const cappedCapture = await cappedManager.capture(cappedName, 1000);
+	assert.match(cappedCapture.output, /REQ012_TTY_OK/);
+	await cappedManager.close(cappedName, false);
+	cleanupTargets.splice(cleanupTargets.indexOf(capped.paneId), 1);
+
+	const unlimitedName = `unlimited-${suffix}`;
+	const unlimited = await manager.start({
+		name: unlimitedName,
+		command: "printf '%020000d\\n' 1; printf 'REQ011_UNLIMITED_MARKER\\n'",
+		cwd: process.cwd(),
+		windowName,
+	});
+	cleanupTargets.push(unlimited.paneId);
+	const unlimitedWaited = await manager.wait(unlimitedName, 10);
+	assert.equal(unlimitedWaited.job.exitCode, 0);
+	assert.ok((await stat(join(unlimited.directory, "output.log"))).size > 4096);
+	await manager.close(unlimitedName, false);
+	cleanupTargets.splice(cleanupTargets.indexOf(unlimited.paneId), 1);
+
+	const previousMaxLogBytes = process.env.PI_TMUX_JOB_MAX_LOG_BYTES;
+	process.env.PI_TMUX_JOB_MAX_LOG_BYTES = "invalid";
+	const invalidManager = new TmuxJobManager(exec, { rootDirectory });
+	if (previousMaxLogBytes === undefined) delete process.env.PI_TMUX_JOB_MAX_LOG_BYTES;
+	else process.env.PI_TMUX_JOB_MAX_LOG_BYTES = previousMaxLogBytes;
+	await assert.rejects(
+		invalidManager.start({
+			name: `invalid-cap-${suffix}`,
+			command: "true",
+			cwd: process.cwd(),
+			windowName,
+		}),
+		/PI_TMUX_JOB_MAX_LOG_BYTES must be 0 or a positive integer byte count/,
+	);
 
 	const runningName = `running-${suffix}`;
 	const running = await manager.start({

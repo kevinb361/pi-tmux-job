@@ -27,6 +27,7 @@ try {
 		"agent-adapters.ts",
 		"completion-notifier.ts",
 		"job-manager.ts",
+		"log-writer.mjs",
 		"model-registry.ts",
 		"extension-manifest.json",
 		"README.md",
@@ -61,13 +62,15 @@ try {
 	const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 	const manifest = JSON.parse(await readFile(join(packageRoot, "extension-manifest.json"), "utf8"));
 	const readme = await readFile(join(packageRoot, "README.md"), "utf8");
-	assert.equal(packageJson.version, "1.1.0");
+	assert.equal(packageJson.version, "1.2.0");
 	assert.deepEqual(packageJson.pi.extensions, ["./index.ts"]);
 	assert.equal(manifest.version, packageJson.version);
 	assert.deepEqual(manifest.provides.tools, ["tmux_job", "tmux_agent"]);
 	for (const documented of [
 		/`pi`, `claude`, or `hermes`/,
 		/litellm\/deep/,
+		/PI_TMUX_JOB_MAX_LOG_BYTES/,
+		/log-truncated/,
 		/normal configuration, rules, memory, skills, and plugins/,
 		/Hermes exception/,
 		/old session's watcher is cancelled/,

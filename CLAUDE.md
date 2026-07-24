@@ -17,6 +17,7 @@ index.ts                 Pi extension plus tmux_job and tmux_agent registration
 agent-adapters.ts        Structured Pi, Claude Code, and Hermes CLI commands
 completion-notifier.ts   Session-scoped dispatch completion messages
 job-manager.ts           Tmux pane lifecycle, state, input, and durable job records
+log-writer.mjs           Streaming unlimited or operator-capped terminal-log sink
 model-registry.ts        Exact Pi provider/model discovery and validation
 test-manager.mjs         Tmux lifecycle integration tests
 test-extension.mjs       Pi discovery and real tool invocation test

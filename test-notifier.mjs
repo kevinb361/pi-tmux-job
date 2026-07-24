@@ -13,6 +13,8 @@ function job(overrides = {}) {
 		name: "agent-1",
 		directory: "/tmp/tmux-agent/job-1",
 		state: "running",
+		maxLogBytes: 0,
+		logTruncated: false,
 		...overrides,
 	};
 }
@@ -42,7 +44,15 @@ function job(overrides = {}) {
 {
 	const messages = [];
 	const longDirectory = `/tmp/${"x".repeat(6000)}/job-failed`;
-	const failed = job({ id: "job-failed", name: "agent-failed", directory: longDirectory, state: "exited", exitCode: 7 });
+	const failed = job({
+		id: "job-failed",
+		name: "agent-failed",
+		directory: longDirectory,
+		state: "exited",
+		exitCode: 7,
+		maxLogBytes: 4096,
+		logTruncated: true,
+	});
 	const manager = { async wait() { return { job: failed, timedOut: false }; } };
 	const notifier = new DispatchCompletionNotifier(manager, (message) => messages.push(message));
 	notifier.watch(failed, "claude");
@@ -50,8 +60,11 @@ function job(overrides = {}) {
 	assert.equal(messages.length, 1);
 	assert.match(messages[0].content, /backend=claude/);
 	assert.match(messages[0].content, /exit=7/);
+	assert.match(messages[0].content, /truncated to newest 4096 bytes/);
 	assert.ok(messages[0].content.length < 5000);
 	assert.ok(messages[0].details.logPath.endsWith("/output.log"));
+	assert.equal(messages[0].details.maxLogBytes, 4096);
+	assert.equal(messages[0].details.logTruncated, true);
 }
 
 {

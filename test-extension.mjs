@@ -11,6 +11,7 @@ const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const agentDirectory = await mkdtemp(join(tmpdir(), "pi-tmux-job-agent-"));
 const jobDirectory = await mkdtemp(join(tmpdir(), "pi-tmux-job-extension-"));
 process.env.PI_TMUX_JOB_ROOT = jobDirectory;
+process.env.PI_TMUX_JOB_MAX_LOG_BYTES = "4096";
 const fakeBinDirectory = join(agentDirectory, "fake-bin");
 await mkdir(fakeBinDirectory);
 const fakeAgent = `#!/usr/bin/env bash
@@ -67,6 +68,10 @@ assert.equal(shutdownHandlers.length, 1, "tmux_agent must register one session-s
 
 const tool = registration.definition;
 const agentTool = agentRegistration.definition;
+assert.ok(!("max_log_bytes" in tool.parameters.properties));
+assert.ok(!("maxLogBytes" in tool.parameters.properties));
+assert.ok(!("max_log_bytes" in agentTool.parameters.properties));
+assert.ok(!("maxLogBytes" in agentTool.parameters.properties));
 assert.match(agentTool.description, /Hermes one-shot mode exposes its prompt in argv/);
 const readme = await readFile(join(repoRoot, "README.md"), "utf8");
 assert.match(readme, /Hermes exception/);
@@ -104,9 +109,18 @@ try {
 		window: `pi-extension-test-${process.pid}`,
 	});
 	openTargets.add(boundedName);
-	await call("wait-bounded", { action: "wait", target: boundedName, timeout_seconds: 10, lines: 20 });
+	const boundedWaited = await call("wait-bounded", {
+		action: "wait",
+		target: boundedName,
+		timeout_seconds: 10,
+		lines: 20,
+	});
+	assert.equal(boundedWaited.details.job.maxLogBytes, 4096);
+	assert.equal(boundedWaited.details.job.logTruncated, true);
+	assert.match(boundedWaited.content[0].text, /older terminal output was discarded/);
 	const bounded = await call("tail-bounded", { action: "tail", target: boundedName, lines: 1000 });
 	assert.match(bounded.content[0].text, /Output truncated/);
+	assert.match(bounded.content[0].text, /older terminal output was discarded/);
 	assert.ok(Buffer.byteLength(bounded.content[0].text, "utf8") < 55 * 1024);
 	await call("close-bounded", { action: "close", target: boundedName });
 	openTargets.delete(boundedName);

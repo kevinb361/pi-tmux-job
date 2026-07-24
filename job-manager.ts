@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface ExecResult {
 	stdout: string;
@@ -26,6 +27,8 @@ export interface TmuxPaneJob {
 	name: string;
 	directory: string;
 	state: string;
+	maxLogBytes: number;
+	logTruncated: boolean;
 	exitCode?: number;
 }
 
@@ -43,6 +46,7 @@ const FIELD_SEPARATOR = "|||PI_TMUX_JOB|||";
 const DEFAULT_WINDOW_NAME = "pi-jobs";
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const WINDOW_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,31}$/;
+const DEFAULT_LOG_WRITER_PATH = fileURLToPath(new URL("./log-writer.mjs", import.meta.url));
 
 function assertSafeName(value: string, kind: "job" | "window"): void {
 	const pattern = kind === "job" ? NAME_PATTERN : WINDOW_PATTERN;
@@ -63,6 +67,19 @@ function parseExitCode(value: string): number | undefined {
 	return Number.parseInt(value.trim(), 10);
 }
 
+function parseMaxLogBytes(value: string | number | undefined): number {
+	if (value === undefined) return 0;
+	const text = String(value).trim();
+	if (!/^(0|[1-9]\d*)$/.test(text)) {
+		throw new Error("PI_TMUX_JOB_MAX_LOG_BYTES must be 0 or a positive integer byte count");
+	}
+	const parsed = Number(text);
+	if (!Number.isSafeInteger(parsed)) {
+		throw new Error("PI_TMUX_JOB_MAX_LOG_BYTES exceeds JavaScript's safe integer range");
+	}
+	return parsed;
+}
+
 async function readOptional(path: string): Promise<string | undefined> {
 	try {
 		return (await readFile(path, "utf8")).trim();
@@ -70,6 +87,23 @@ async function readOptional(path: string): Promise<string | undefined> {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
 		throw error;
 	}
+}
+
+async function readMaxLogBytes(directory: string): Promise<number> {
+	const path = resolve(directory, "metadata.json");
+	const raw = await readOptional(path);
+	if (raw === undefined) return 0;
+	let metadata: unknown;
+	try {
+		metadata = JSON.parse(raw);
+	} catch (error) {
+		throw new Error(`Invalid job metadata at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	const value = (metadata as { maxLogBytes?: unknown }).maxLogBytes ?? 0;
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+		throw new Error(`Invalid maxLogBytes in job metadata at ${path}`);
+	}
+	return value;
 }
 
 function runnerScript(
@@ -151,14 +185,23 @@ exec "\${SHELL:-/bin/bash}" -l
 export class TmuxJobManager {
 	private readonly rootDirectory: string;
 	private readonly anchorPane: string;
+	private readonly maxLogBytesSetting: string | number | undefined;
+	private readonly logWriterPath: string;
 
 	constructor(
 		private readonly exec: ExecFunction,
-		options: { rootDirectory?: string; anchorPane?: string } = {},
+		options: {
+			rootDirectory?: string;
+			anchorPane?: string;
+			maxLogBytes?: number;
+			logWriterPath?: string;
+		} = {},
 	) {
 		this.rootDirectory =
 			options.rootDirectory ?? process.env.PI_TMUX_JOB_ROOT ?? resolve(homedir(), ".pi", "agent", "tmux-jobs");
 		this.anchorPane = options.anchorPane ?? process.env.TMUX_PANE ?? "";
+		this.maxLogBytesSetting = options.maxLogBytes ?? process.env.PI_TMUX_JOB_MAX_LOG_BYTES;
+		this.logWriterPath = options.logWriterPath ?? DEFAULT_LOG_WRITER_PATH;
 	}
 
 	async ensureAvailable(signal?: AbortSignal): Promise<string> {
@@ -207,6 +250,8 @@ export class TmuxJobManager {
 			if (rowSession !== sessionId || !id || !directory) continue;
 			const state = (await readOptional(resolve(directory, "state"))) ?? "unknown";
 			const rawExit = await readOptional(resolve(directory, "exit-code"));
+			const maxLogBytes = await readMaxLogBytes(directory);
+			const logTruncated = (await readOptional(resolve(directory, "log-truncated"))) === "true";
 			jobs.push({
 				sessionId: rowSession,
 				windowId,
@@ -217,6 +262,8 @@ export class TmuxJobManager {
 				name,
 				directory,
 				state,
+				maxLogBytes,
+				logTruncated,
 				exitCode: rawExit === undefined ? undefined : parseExitCode(rawExit),
 			});
 		}
@@ -234,6 +281,7 @@ export class TmuxJobManager {
 		if (options.input !== undefined && Buffer.byteLength(options.input, "utf8") > 1024 * 1024) {
 			throw new Error("input exceeds the 1MB tmux_job limit");
 		}
+		const maxLogBytes = parseMaxLogBytes(this.maxLogBytesSetting);
 
 		const cwd = resolve(options.cwd);
 		const cwdStat = await stat(cwd);
@@ -255,6 +303,7 @@ export class TmuxJobManager {
 		const exitPath = resolve(directory, "exit-code");
 		const pipeReadyPath = resolve(directory, "pipe-ready");
 		const pipeDrainedPath = resolve(directory, "pipe-drained");
+		const logTruncatedPath = resolve(directory, "log-truncated");
 		const inputPath = options.input === undefined ? undefined : resolve(directory, "input.txt");
 		await writeFile(commandPath, `${options.command}\n`, { mode: 0o700 });
 		if (inputPath) await writeFile(inputPath, options.input ?? "", { mode: 0o600 });
@@ -266,7 +315,7 @@ export class TmuxJobManager {
 		await writeFile(statePath, "launching\n", { mode: 0o600 });
 		await writeFile(
 			resolve(directory, "metadata.json"),
-			`${JSON.stringify({ id, name: options.name, cwd, windowName, createdAt: new Date().toISOString() }, null, 2)}\n`,
+			`${JSON.stringify({ id, name: options.name, cwd, windowName, maxLogBytes, createdAt: new Date().toISOString() }, null, 2)}\n`,
 			{ mode: 0o600 },
 		);
 
@@ -303,7 +352,10 @@ export class TmuxJobManager {
 			throw new Error(`Unable to create tmux pane: ${created.stderr.trim() || created.stdout.trim()}`);
 		}
 		const paneId = created.stdout.trim();
-		const pipeCommand = `umask 077; cat >> ${shellQuote(logPath)}; : > ${shellQuote(pipeDrainedPath)}`;
+		const pipeCommand =
+			`umask 077; exec ${shellQuote(process.execPath)} ${shellQuote(this.logWriterPath)} ` +
+			`--log ${shellQuote(logPath)} --drained ${shellQuote(pipeDrainedPath)} ` +
+			`--truncated ${shellQuote(logTruncatedPath)} --max-bytes ${maxLogBytes}`;
 		const piped = await this.exec("tmux", ["pipe-pane", "-o", "-t", paneId, pipeCommand], {
 			signal: options.signal,
 			timeout: 5000,

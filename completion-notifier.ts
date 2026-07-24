@@ -58,16 +58,27 @@ export class DispatchCompletionNotifier {
 			this.delivered.add(job.id);
 			const exit = completed.exitCode === undefined ? "unknown" : String(completed.exitCode);
 			const logPath = boundedField(`${completed.directory}/output.log`);
+			const retention = completed.logTruncated
+				? `\nLog retention: truncated to newest ${completed.maxLogBytes} bytes; older output was discarded.`
+				: "";
 			const content =
 				`Agent dispatch completed: backend=${backend} job=${completed.name} id=${completed.id} ` +
 				`pane=${completed.paneId} state=${completed.state} exit=${exit}\n` +
-				`Inspect: ${logPath}\nManage with tmux_job target=${completed.name}`;
+				`Inspect: ${logPath}${retention}\nManage with tmux_job target=${completed.name}`;
 			this.notify(
 				{
 					customType: "tmux-agent-completion",
 					content,
 					display: true,
-					details: { backend, jobId: completed.id, paneId: completed.paneId, exitCode: completed.exitCode, logPath },
+					details: {
+						backend,
+						jobId: completed.id,
+						paneId: completed.paneId,
+						exitCode: completed.exitCode,
+						logPath,
+						maxLogBytes: completed.maxLogBytes,
+						logTruncated: completed.logTruncated,
+					},
 				},
 				{ deliverAs: "followUp", triggerTurn: true },
 			);

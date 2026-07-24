@@ -23,7 +23,24 @@ const ACTIONS = ["start", "list", "status", "tail", "wait", "send", "interrupt",
 
 function describeJob(job: TmuxPaneJob): string {
 	const exit = job.exitCode === undefined ? "-" : String(job.exitCode);
-	return `${job.name} id=${job.id} pane=${job.paneId} state=${job.state} exit=${exit} window=${job.windowId}`;
+	const retention =
+		job.maxLogBytes === 0
+			? "unlimited"
+			: job.logTruncated
+				? `truncated:${job.maxLogBytes}`
+				: `capped:${job.maxLogBytes}`;
+	return (
+		`${job.name} id=${job.id} pane=${job.paneId} state=${job.state} exit=${exit} ` +
+		`window=${job.windowId} log=${retention}`
+	);
+}
+
+function logRetentionNotice(job: TmuxPaneJob): string {
+	if (!job.logTruncated) return "";
+	return (
+		`\n\n[Persistent output.log retains the newest ${job.maxLogBytes} bytes; older terminal output was discarded. ` +
+		`Truncation marker: ${job.directory}/log-truncated]`
+	);
 }
 
 function formatJobs(jobs: TmuxPaneJob[]): string {
@@ -31,7 +48,7 @@ function formatJobs(jobs: TmuxPaneJob[]): string {
 	return jobs.map(describeJob).join("\n");
 }
 
-function boundedOutput(output: string, fullOutputPath?: string): string {
+function boundedOutput(output: string, retainedOutputPath?: string): string {
 	const truncation = truncateTail(output, {
 		maxLines: DEFAULT_MAX_LINES,
 		maxBytes: DEFAULT_MAX_BYTES,
@@ -41,7 +58,7 @@ function boundedOutput(output: string, fullOutputPath?: string): string {
 		`${truncation.content}\n\n` +
 		`[Output truncated to ${truncation.outputLines}/${truncation.totalLines} lines ` +
 		`(${formatSize(truncation.outputBytes)}/${formatSize(truncation.totalBytes)}).` +
-		(fullOutputPath ? ` Full job log: ${fullOutputPath}]` : "]")
+		(retainedOutputPath ? ` Retained job log: ${retainedOutputPath}]` : "]")
 	);
 }
 
@@ -129,10 +146,11 @@ export default function (pi: ExtensionAPI) {
 				case "status": {
 					const target = requireParameter(params.target, "target");
 					const captured = await manager.capture(target, params.lines ?? 30, signal);
-					const text = `${describeJob(captured.job)}\n\n${boundedOutput(
-						captured.output,
-						`${captured.job.directory}/output.log`,
-					)}`;
+					const text =
+						`${describeJob(captured.job)}\n\n${boundedOutput(
+							captured.output,
+							`${captured.job.directory}/output.log`,
+						)}` + logRetentionNotice(captured.job);
 					return { content: [{ type: "text", text }], details: { job: captured.job } };
 				}
 				case "tail": {
@@ -142,7 +160,9 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: boundedOutput(captured.output, `${captured.job.directory}/output.log`),
+								text:
+									boundedOutput(captured.output, `${captured.job.directory}/output.log`) +
+									logRetentionNotice(captured.job),
 							},
 						],
 						details: { job: captured.job },
@@ -166,10 +186,11 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `${prefix}\n${describeJob(captured.job)}\n\n${boundedOutput(
-									captured.output,
-									`${captured.job.directory}/output.log`,
-								)}`,
+								text:
+									`${prefix}\n${describeJob(captured.job)}\n\n${boundedOutput(
+										captured.output,
+										`${captured.job.directory}/output.log`,
+									)}` + logRetentionNotice(captured.job),
 							},
 						],
 						details: { job: captured.job, timedOut: result.timedOut },
@@ -199,7 +220,9 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `Closed ${job.name} (${job.paneId}). Persistent files remain at ${job.directory}.`,
+								text:
+									`Closed ${job.name} (${job.paneId}). Persistent files remain at ${job.directory}.` +
+									logRetentionNotice(job),
 							},
 						],
 						details: { job },
