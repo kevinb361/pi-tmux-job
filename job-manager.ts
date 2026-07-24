@@ -34,6 +34,7 @@ export interface StartJobOptions {
 	command: string;
 	cwd: string;
 	windowName?: string;
+	input?: string;
 	signal?: AbortSignal;
 }
 
@@ -71,17 +72,26 @@ async function readOptional(path: string): Promise<string | undefined> {
 	}
 }
 
-function runnerScript(cwd: string, commandPath: string, logPath: string, statePath: string, exitPath: string): string {
+function runnerScript(
+	cwd: string,
+	commandPath: string,
+	statePath: string,
+	exitPath: string,
+	pipeReadyPath: string,
+	pipeDrainedPath: string,
+	inputPath?: string,
+): string {
 	return `#!/usr/bin/env bash
 set +e
 
 cwd=${shellQuote(cwd)}
 command_file=${shellQuote(commandPath)}
-log_file=${shellQuote(logPath)}
 state_file=${shellQuote(statePath)}
 exit_file=${shellQuote(exitPath)}
-interrupted=0
-trap 'interrupted=1' INT
+pipe_ready_file=${shellQuote(pipeReadyPath)}
+pipe_drained_file=${shellQuote(pipeDrainedPath)}
+input_file=${shellQuote(inputPath ?? "")}
+trap ':' INT
 
 write_state() {
   local value="$1"
@@ -90,23 +100,46 @@ write_state() {
   mv -f -- "$tmp" "$state_file"
 }
 
-write_state running
-rm -f -- "$exit_file"
-printf '[tmux-job] started=%s cwd=%s\\n' "$(date --iso-8601=seconds)" "$cwd" | tee -a "$log_file"
-cd -- "$cwd"
-cd_rc=$?
-if [ "$cd_rc" -ne 0 ]; then
-  printf '[tmux-job] unable to enter cwd; exit=%s\\n' "$cd_rc" | tee -a "$log_file"
-  printf '%s\\n' "$cd_rc" > "$exit_file"
-  write_state exited
+for _ in {1..500}; do
+  [ -f "$pipe_ready_file" ] && break
+  sleep 0.01
+done
+if [ ! -f "$pipe_ready_file" ]; then
+  printf '[tmux-job] logger did not become ready\\n'
+  printf '1\\n' > "$exit_file"
+  write_state launch-failed
 else
-  shell="\${SHELL:-/bin/bash}"
-  set -o pipefail
-  "$shell" -lc "$(<"$command_file")" 2>&1 | tee -a "$log_file"
-  rc=\${PIPESTATUS[0]}
+  write_state running
+  rm -f -- "$exit_file" "$pipe_drained_file"
+  printf '[tmux-job] started=%s cwd=%s\\n' "$(date --iso-8601=seconds)" "$cwd"
+  cd -- "$cwd"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '[tmux-job] unable to enter cwd; exit=%s\\n' "$rc"
+  else
+    shell="\${SHELL:-/bin/bash}"
+    if [ -n "$input_file" ]; then
+      export PI_TMUX_JOB_INPUT="$input_file"
+      "$shell" -lc "$(<"$command_file")" < "$input_file"
+    else
+      "$shell" -lc "$(<"$command_file")"
+    fi
+    rc=$?
+  fi
   printf '%s\\n' "$rc" > "$exit_file"
-  write_state exited
-  printf '[tmux-job] finished=%s exit=%s\\n' "$(date --iso-8601=seconds)" "$rc" | tee -a "$log_file"
+  printf '[tmux-job] finished=%s exit=%s\\n' "$(date --iso-8601=seconds)" "$rc"
+
+  tmux pipe-pane -t "$TMUX_PANE" 2>/dev/null
+  for _ in {1..500}; do
+    [ -f "$pipe_drained_file" ] && break
+    sleep 0.01
+  done
+  if [ -f "$pipe_drained_file" ]; then
+    write_state exited
+  else
+    write_state log-failed
+    printf '[tmux-job] logger did not drain cleanly\\n'
+  fi
 fi
 
 printf '\\n[tmux-job] command finished; pane left open for inspection\\n'
@@ -198,6 +231,9 @@ export class TmuxJobManager {
 		if (Buffer.byteLength(options.command, "utf8") > 64 * 1024) {
 			throw new Error("command exceeds the 64KB tmux_job limit");
 		}
+		if (options.input !== undefined && Buffer.byteLength(options.input, "utf8") > 1024 * 1024) {
+			throw new Error("input exceeds the 1MB tmux_job limit");
+		}
 
 		const cwd = resolve(options.cwd);
 		const cwdStat = await stat(cwd);
@@ -217,8 +253,16 @@ export class TmuxJobManager {
 		const logPath = resolve(directory, "output.log");
 		const statePath = resolve(directory, "state");
 		const exitPath = resolve(directory, "exit-code");
+		const pipeReadyPath = resolve(directory, "pipe-ready");
+		const pipeDrainedPath = resolve(directory, "pipe-drained");
+		const inputPath = options.input === undefined ? undefined : resolve(directory, "input.txt");
 		await writeFile(commandPath, `${options.command}\n`, { mode: 0o700 });
-		await writeFile(runnerPath, runnerScript(cwd, commandPath, logPath, statePath, exitPath), { mode: 0o700 });
+		if (inputPath) await writeFile(inputPath, options.input ?? "", { mode: 0o600 });
+		await writeFile(
+			runnerPath,
+			runnerScript(cwd, commandPath, statePath, exitPath, pipeReadyPath, pipeDrainedPath, inputPath),
+			{ mode: 0o700 },
+		);
 		await writeFile(statePath, "launching\n", { mode: 0o600 });
 		await writeFile(
 			resolve(directory, "metadata.json"),
@@ -259,6 +303,18 @@ export class TmuxJobManager {
 			throw new Error(`Unable to create tmux pane: ${created.stderr.trim() || created.stdout.trim()}`);
 		}
 		const paneId = created.stdout.trim();
+		const pipeCommand = `umask 077; cat >> ${shellQuote(logPath)}; : > ${shellQuote(pipeDrainedPath)}`;
+		const piped = await this.exec("tmux", ["pipe-pane", "-o", "-t", paneId, pipeCommand], {
+			signal: options.signal,
+			timeout: 5000,
+		});
+		if (piped.code !== 0) {
+			await writeFile(statePath, "launch-failed\n", { mode: 0o600 });
+			await this.exec("tmux", ["kill-pane", "-t", paneId], { timeout: 5000 });
+			throw new Error(`Unable to attach log pipe to ${paneId}: ${piped.stderr.trim()}`);
+		}
+		await writeFile(pipeReadyPath, "ready\n", { mode: 0o600 });
+
 		for (const [key, value] of [
 			["@pi_tmux_job_id", id],
 			["@pi_tmux_job_name", options.name],

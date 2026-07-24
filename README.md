@@ -38,12 +38,13 @@ For local development:
 pi install -l /path/to/pi-tmux-job
 ```
 
-## Tool
+## Tools
 
-The package registers one LLM-callable tool:
+The package registers two LLM-callable tools:
 
 ```text
 tmux_job
+tmux_agent
 ```
 
 Supported actions:
@@ -61,6 +62,33 @@ Supported actions:
 
 Jobs are addressed by name, generated ID, or tmux pane ID. The default window is `pi-jobs`; callers can select another safe window name.
 
+### Agent launcher
+
+`tmux_agent` launches the `pi`, `claude`, or `hermes` CLI. The returned job uses the same ownership and lifecycle controls as `tmux_job`.
+
+| Parameter | Purpose |
+|---|---|
+| `backend` | Required: `pi`, `claude`, or `hermes` |
+| `mode` | `dispatch` (default) or `interactive` |
+| `name` | Required unique safe job name |
+| `prompt` | Required for dispatch; rejected for interactive mode |
+| `model` | Exact Pi `provider/model`; valid only with `backend: pi` |
+| `thinking` | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
+| `cwd` | Child working directory; defaults to Pi's current directory |
+| `window` | Tmux window; defaults to `pi-jobs` |
+
+Dispatch returns immediately and sends one bounded completion message back to the originating live Pi session. Jobs continue in tmux if Pi reloads or exits, but the old session's watcher is cancelled. Interactive mode starts the native CLI without an initial prompt; use `tmux_job send` or take over the pane directly.
+
+Pi model selection is validated against the live output of `pi --list-models` before launch. Use exact identifiers, for example `openai-codex/gpt-5.6-sol`, `litellm/deep`, `litellm/deep-think`, or `litellm/fast`. GPT and local LiteLLM models run through the Pi harness; this package does not launch Codex CLI.
+
+Each backend otherwise retains its native configuration. In particular, Hermes continues to load the operator's normal configuration, rules, memory, skills, and plugins. Override executable paths when needed:
+
+```bash
+export PI_TMUX_AGENT_PI_BIN=/path/to/pi
+export PI_TMUX_AGENT_CLAUDE_BIN=/path/to/claude
+export PI_TMUX_AGENT_HERMES_BIN=/path/to/hermes
+```
+
 ## Example prompts
 
 ```text
@@ -75,11 +103,24 @@ Start npm run dev in a tmux pane named web-dev. Leave it running and tail the la
 List my Pi-owned tmux jobs and close the completed ones.
 ```
 
+```text
+Dispatch a Pi agent named local-review using litellm/deep with high thinking to review this repository. Notify me when it finishes.
+```
+
+```text
+Launch Claude Code interactively in a pane named claude-debug, then show me how to take over the pane.
+```
+
+```text
+Dispatch Hermes as hermes-docs to review the README. I accept Hermes one-shot approval bypass and argv prompt exposure.
+```
+
 ## Behavior
 
 - Panes are created detached, so Pi retains focus.
 - Jobs in the same named window are tiled automatically.
-- The initial command runs through the user's login shell.
+- The initial command runs through the user's login shell with stdin, stdout, and stderr attached to a genuine tmux PTY.
+- Tmux-native pane logging preserves the full initial-command log without placing the command behind a `tee` pipeline.
 - Completed panes remain open at a shell for inspection.
 - Each job records its command, metadata, state, exit code, and full initial-command log under:
 
@@ -91,15 +132,30 @@ List my Pi-owned tmux jobs and close the completed ones.
 - Only panes tagged by this extension can be managed through the tool.
 - Output returned to the model is bounded to Pi's 50KB/2000-line limits.
 
+## Troubleshooting
+
+- **Not running inside tmux:** start Pi from a tmux session; the tools intentionally refuse an unobservable fallback.
+- **Executable unavailable:** install the selected CLI or set its `PI_TMUX_AGENT_*_BIN` override.
+- **Model rejected:** run `pi --list-models` and pass an exact `provider/model`; unqualified or ambiguous names are rejected.
+- **Job name already exists:** close the existing owned pane or choose another name.
+- **Dispatch survives reload without notifying:** expected—the tmux job continues, but session-scoped watchers are cancelled on reload or shutdown. Inspect it with `tmux_job list/status/wait`.
+- **Full command output needed:** read the retained `output.log` path reported by the tool; model-facing output remains bounded.
+
 ## Safety model
 
 This extension has the same command-execution authority as Pi's Bash tool. It provides execution and visibility—not authorization.
 
 - It does not add production approval or permission gates.
+- Agent adapters do not inject explicit permission-bypass flags and otherwise preserve each CLI's native behavior.
+- **Hermes exception:** dispatch uses native one-shot mode, which auto-bypasses Hermes approvals and transiently exposes the prompt in process argv; the tool reports this on every Hermes dispatch.
 - It refuses to close a running job unless forced.
 - It does not manage unrelated tmux panes.
 - Callers should not launch concurrent jobs that edit the same shared files.
 - Review third-party agent instructions before allowing them to invoke arbitrary commands.
+
+## Non-goals
+
+This release does not provide built-in worktree creation, persistent backend session resume, workflow DAGs, hidden scheduling, an embedded terminal overlay, or a Codex CLI adapter. Callers choose `cwd` and coordinate concurrent writers explicitly.
 
 ## Development
 

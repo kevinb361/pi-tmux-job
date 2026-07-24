@@ -1,0 +1,5 @@
+{
+  "gate": "npm run check",
+  "close_out_auditor": "claude -p --allowedTools Read,Grep,Glob,Bash,Write,Edit --permission-mode acceptEdits",
+  "_close_out_auditor_note": "Independent frontier close-out auditor. The brief is appended as the trailing positional argument; keep the single-value permission flag after variadic --allowedTools so it does not consume the prompt."
+}

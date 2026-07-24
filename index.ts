@@ -8,7 +8,16 @@ import {
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { resolve } from "node:path";
+import {
+	AGENT_BACKENDS,
+	AGENT_MODES,
+	PI_THINKING_LEVELS,
+	agentExecutable,
+	buildAgentCommand,
+} from "./agent-adapters.ts";
+import { DispatchCompletionNotifier } from "./completion-notifier.ts";
 import { TmuxJobManager, type TmuxPaneJob } from "./job-manager.ts";
+import { validatePiModel } from "./model-registry.ts";
 
 const ACTIONS = ["start", "list", "status", "tail", "wait", "send", "interrupt", "close"] as const;
 
@@ -42,7 +51,11 @@ function requireParameter(value: string | undefined, name: string): string {
 }
 
 export default function (pi: ExtensionAPI) {
-	const manager = new TmuxJobManager((command, args, options) => pi.exec(command, args, options));
+	const exec = (command: string, args: string[], options?: Parameters<typeof pi.exec>[2]) =>
+		pi.exec(command, args, options);
+	const manager = new TmuxJobManager(exec);
+	const notifier = new DispatchCompletionNotifier(manager, (message, options) => pi.sendMessage(message, options));
+	pi.on("session_shutdown", () => notifier.shutdown());
 
 	pi.registerTool({
 		name: "tmux_job",
@@ -193,6 +206,80 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 			}
+		},
+	});
+
+	pi.registerTool({
+		name: "tmux_agent",
+		label: "tmux agent",
+		description:
+			"Launch Pi, Claude Code, or Hermes as an observable child agent in a Pi-owned tmux pane. " +
+			"dispatch requires a prompt and returns immediately; interactive starts the native CLI for direct use. " +
+			"Pi and Claude prompts use private stdin transport; Hermes one-shot mode exposes its prompt in argv and auto-bypasses approvals. " +
+			"Use tmux_job with the returned name or pane id to inspect, send input, interrupt, wait, or close.",
+		promptSnippet: "Launch observable Pi, Claude Code, or Hermes child agents in tmux panes",
+		promptGuidelines: [
+			"Use tmux_agent when delegating a bounded task to Pi, Claude Code, or Hermes and tmux_job to manage the resulting pane.",
+			"Do not launch concurrent writer agents against the same working tree.",
+			"Agent launch visibility does not replace approval for production, destructive, migration, or network changes.",
+		],
+		parameters: Type.Object({
+			backend: StringEnum(AGENT_BACKENDS, { description: "Child-agent CLI" }),
+			mode: Type.Optional(
+				StringEnum(AGENT_MODES, { description: "dispatch (default) or interactive native CLI" }),
+			),
+			name: Type.String({ description: "Unique safe pane/job name" }),
+			prompt: Type.Optional(Type.String({ description: "Task prompt; required for dispatch" })),
+			model: Type.Optional(
+				Type.String({ description: "Exact Pi provider/model identifier; valid only for the pi backend" }),
+			),
+			thinking: Type.Optional(
+				StringEnum(PI_THINKING_LEVELS, { description: "Pi thinking level; valid only for the pi backend" }),
+			),
+			cwd: Type.Optional(Type.String({ description: "Working directory; defaults to Pi's cwd" })),
+			window: Type.Optional(Type.String({ description: "Tmux window; defaults to pi-jobs" })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			if (signal?.aborted) return { content: [{ type: "text", text: "Cancelled" }], details: {} };
+			const mode = params.mode ?? "dispatch";
+			if (mode === "dispatch" && !params.prompt?.trim()) {
+				throw new Error("prompt is required for tmux_agent dispatch");
+			}
+			if (mode === "interactive" && params.prompt !== undefined) {
+				throw new Error("interactive tmux_agent launches do not accept a prompt; use tmux_job send instead");
+			}
+			if (params.backend !== "pi" && (params.model !== undefined || params.thinking !== undefined)) {
+				throw new Error("model and thinking are currently supported only for the pi backend");
+			}
+			const model =
+				params.backend === "pi" && params.model !== undefined
+					? await validatePiModel(exec, agentExecutable("pi"), params.model, signal)
+					: undefined;
+			const job = await manager.start({
+				name: params.name,
+				command: buildAgentCommand(params.backend, mode, { model, thinking: params.thinking }),
+				cwd: resolve(ctx.cwd, params.cwd ?? "."),
+				windowName: params.window,
+				input: mode === "dispatch" ? params.prompt : undefined,
+				signal,
+			});
+			if (mode === "dispatch") notifier.watch(job, params.backend);
+			const warning =
+				params.backend === "hermes" && mode === "dispatch"
+					? "\nWarning: native Hermes one-shot mode auto-bypasses approvals and exposes its prompt in process argv."
+					: "";
+			return {
+				content: [
+					{
+						type: "text",
+						text:
+							`Started ${params.backend} ${mode}: ${describeJob(job)}\n` +
+							`Persistent files: ${job.directory}\n` +
+							`Use tmux_job with ${job.name} or ${job.paneId} for lifecycle controls.${warning}`,
+					},
+				],
+				details: { job, backend: params.backend, mode, model, thinking: params.thinking },
+			};
 		},
 	});
 }

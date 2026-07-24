@@ -5,6 +5,9 @@ repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 run_tests() {
   node --no-warnings --experimental-transform-types "$repo_dir/test-manager.mjs"
+  node --no-warnings --experimental-transform-types "$repo_dir/test-hermes-config.mjs"
+  node --no-warnings --experimental-transform-types "$repo_dir/test-notifier.mjs"
+  node --no-warnings --experimental-transform-types "$repo_dir/test-package.mjs"
   node "$repo_dir/test-extension.mjs"
 }
 

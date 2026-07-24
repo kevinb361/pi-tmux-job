@@ -1,7 +1,7 @@
 {
   "name": "pi-tmux-job",
-  "version": "1.0.0",
-  "description": "Observable long-running command execution in tmux panes for Pi coding agent",
+  "version": "1.1.0",
+  "description": "Observable command and child-agent execution in tmux panes for Pi coding agent",
   "license": "MIT",
   "type": "module",
   "keywords": [
@@ -12,7 +12,10 @@
   ],
   "files": [
     "index.ts",
+    "agent-adapters.ts",
+    "completion-notifier.ts",
     "job-manager.ts",
+    "model-registry.ts",
     "extension-manifest.json",
     "README.md",
     "LICENSE"
