@@ -3,9 +3,9 @@ saga_state_version: 1.0
 milestone: v1.2.2-live-completion-proof
 milestone_name: Live completion proof
 status: complete
-stopped_at: v1.2.2 closed after independent audit PASS; commit and release pending
-last_updated: "2026-07-24T19:24:39Z"
-last_activity: 2026-07-24 — Independent frontier audit passed with REQ-014 PROVEN and the historical REQ-006 warning closed.
+stopped_at: v1.2.2 released and installed; no active milestone
+last_updated: "2026-07-24T19:27:48Z"
+last_activity: 2026-07-24 — Released v1.2.2 at 61d56c9 after independent audit and fresh full gate passed.
 ---
 
 # Session State
@@ -13,7 +13,7 @@ last_activity: 2026-07-24 — Independent frontier audit passed with REQ-014 PRO
 ## Current Position
 Phase/Milestone: v1.2.2-live-completion-proof
 Status: complete
-Last activity: 2026-07-24 — Independent frontier audit passed with REQ-014 PROVEN and the historical REQ-006 warning closed.
+Last activity: 2026-07-24 — Released v1.2.2 at 61d56c9 after independent audit and fresh full gate passed.
 
 ## Active Work
 
