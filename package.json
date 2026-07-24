@@ -1,6 +1,6 @@
 {
   "name": "pi-tmux-job",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Observable command and child-agent execution in tmux panes for Pi coding agent",
   "license": "MIT",
   "type": "module",

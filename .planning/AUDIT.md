@@ -109,3 +109,46 @@ PASS
 - Info: 9 (continuous-bound design, drain/error semantics, backward-compat, reporting channels, package contents, safety notes)
 
 v1.2 is closure-ready. Both new requirements (REQ-011 bounded continuous retention, REQ-012 preserved PTY/drain/exit + truncation reporting) are independently PROVEN with located, freshly reproduced evidence; the gate passes clean with zero vulnerabilities; the disk-bound is enforced continuously during execution (not just at end); chronological newest-bytes retention is byte-exact for the single-write path and marker-confirmed under real tmux; drain/error behavior is fail-visible; backward compatibility with v1.1 unlimited behavior holds; and no correctness or safety defect was found. `saga-audit` does not flip ROADMAP/STATE; the mechanical completion step remains with the executor's `saga-run` after this PASS.
+
+---
+
+## Audit: v1.2.1-tail-verification — 2026-07-24
+
+Auditor: Opus 4.8 (claude-opus-4-8[1m]) — independent frontier close-out context; executed no v1.1/v1.2/v1.2.1 slice.
+Scope: v1.2.1 Tail verification — byte-exact tests prove chronological retained-tail behavior across repeated small over-budget writes (REQ-013), without weakening cap, truncation-marker, or drain guarantees (REQ-011).
+Files reviewed: v1.2.1 delta vs HEAD (v1.2 release, commit 88053c6) — working-tree changes only, no new commit yet. Source `log-writer.mjs` **unchanged**. Changed: `test-log-writer.mjs` (+52/-8: helper extraction `writerPaths`/`writerArguments`/`waitForExactLog` + new chunked multi-write test), `test-package.mjs` (version assert 1.2.0→1.2.1), `package.json`/`extension-manifest.json`/`package-lock.json` (version 1.2.0→1.2.1), plus `.planning/{REQUIREMENTS,ROADMAP,STATE,TRACEABILITY}.md`.
+
+Independence: confirmed. This context did not author or execute any reviewed slice. `.planning/config.json` carries a non-empty `close_out_auditor` key, so the frontier close-out gate is satisfiable. Saga structure lint (`saga-lint --format json`) re-run fresh: `clean: true`, 0 findings, exit 0. Gate re-run fresh: `npm run check` exit 0 (typecheck + all six in-tmux suites, all passing incl. `bounded, unlimited, and byte-exact chunked log-writer tests passed`; `npm audit --omit=dev` = 0 vulnerabilities). Existing PROVEN labels and checked boxes were treated as claims and re-verified against source, tests, recomputed chunk arithmetic, and this run.
+
+### Delta character — test-and-metadata-only, source frozen
+
+- [info] v1.2.1 is a pure verification milestone: it adds the byte-exact multi-chunk retained-tail proof that the v1.2 audit explicitly flagged as the one open warning ("multi-chunk case-3 tail proven by newest-marker not byte-exact ordering … a byte-exact incremental-tail assertion would fully close it"). `git diff HEAD -- log-writer.mjs` is empty — the enforcement logic is unchanged from the already-PROVEN v1.2 writer, so there is no new runtime behavior to regress, only a stronger test over existing code. This is the correct shape for a "tail verification" milestone.
+
+### REQ-013 — does the test genuinely force repeated small over-budget rewrites?
+
+- [info] Yes, verified by independent arithmetic and by reading `writeBounded` against the test. Each chunk is `[chunk-<i>]` (9 B) + `<i>` repeated 61× (61 B) + `\n` (1 B) = **71 B**, for single-digit indices 0–9. Cap is 128 B. Since 71 < 128, the oversized-chunk path (case 1) never fires — the test isolates the *small-chunk* paths, which is exactly REQ-013's target. Trace: chunk 0 → `size+chunk=71≤128` → case 2 append (`size=71`); chunks 1–9 → `size+chunk=128+71 > 128` → case 3 over-budget rewrite (read newest `128-71=57` B, `truncate(0)`, rewrite `[retained 57][new 71]=128`). That is **nine genuine repeated case-3 over-budget rewrites**, not one.
+- [info] The "delayed per-write exact comparison" is what forces the repetition rather than coalescing into one buffer. After each `child.stdin.write(chunk)`, the test blocks in `waitForExactLog` until the on-disk file equals `completeInput.subarray(-128)` for the running stream. Because each chunk's content is distinct (`chunk-0`…`chunk-9`), a stale file can never spuriously match the new expected value, so the poll only returns once *that* chunk has been fully processed and rewritten to disk. The next chunk is therefore sent strictly after the prior one is drained — Node cannot coalesce them into a single stdin read, so each is a separate `for await` iteration and a separate over-budget rewrite. The synchronization is load-bearing, not cosmetic.
+- [info] Intermediate correctness is checked, not just the end state: `waitForExactLog` asserts the byte-exact newest-128 suffix after *every* chunk (its deadline fallback is `assert.deepEqual`), so all nine mid-stream case-3 rewrites are byte-verified. Final assertions confirm file == newest 128 B of the full 710-B stream, `size==128`, `truncated=="true\n"`, `drained=="drained\n"`. Cap, truncation-marker, and drain guarantees (REQ-011/REQ-012 clauses cited by REQ-013) are all re-asserted for this multi-write path. Read-offset safety holds: case 3 only runs when `size+chunk>maxBytes` with `chunk<maxBytes`, which implies `size ≥ maxBytes-chunk = retainedBytes`, so the `handle.read(..., size-retainedBytes)` never underflows.
+
+### Package metadata consistency
+
+- [info] Version is coherent at 1.2.1 across `package.json`, `extension-manifest.json`, and both `package-lock.json` occurrences. `test-package.mjs` asserts the packed `packageJson.version == "1.2.1"` and `manifest.version == packageJson.version`, and this ran green in the fresh gate. `git grep 1.2.0` over tracked non-lock, non-planning files returns nothing — no stale version string survives. README carries no version literal, so no doc drift. `log-writer.mjs` remains listed in `package.json` `files` and asserted present in the offline install.
+
+### Regressions & safety
+
+- [info] No regression surface. The test refactor (path/argument helpers, `...paths` spread in the close handler) preserves `runWriter`'s behavior exactly; the two pre-existing sub-tests (100 KB single-write cap, unlimited) are unchanged in intent and pass. No source, schema, tool, or safety-relevant file changed, so the v1.1/v1.2 safety posture (0600 artifacts, 0700 job dirs, operator-only cap with no model-reachable override, quoted logger spawn, fail-visible drain) is carried forward intact. `npm audit --omit=dev` = 0 vulnerabilities.
+- [info] Working-tree state: the milestone is uncommitted (test + metadata + planning edits staged in the working tree, no new commit). Expected for pre-close-out; commit the milestone at or before the ROADMAP/STATE flip so shipped state lands in history. Not a defect.
+
+### ASSERTED Items from TRACEABILITY.md
+
+- None. The independent sweep classified REQ-001 … REQ-013 as PROVEN (REQ-006 with the noted, unchanged live-turn delivery boundary). No ASSERTED, OPEN, or WAIVED items to adjudicate. REQ-013's prior v1.2 warning is now fully closed by the byte-exact incremental proof.
+
+### Verdict
+
+PASS
+
+- Critical findings: 0 (nothing blocks milestone closure)
+- Warnings: 1 (REQ-006 live-turn delivery still has unit+wiring proof only, no end-to-end integration test — unchanged from v1.1/v1.2, low-risk, out of v1.2.1 scope)
+- Info: notes on the test-only/source-frozen delta, verified nine-rewrite forcing mechanism, mid-stream byte-exactness, metadata consistency, and no-regression/safety posture
+
+v1.2.1 is closure-ready. REQ-013 is independently PROVEN: the delayed per-write exact comparisons genuinely force nine repeated small over-budget rewrites of the existing `writeBounded` case-3 path, every intermediate and final state is byte-checked against the true chronological newest-`maxBytes` suffix, and cap/truncation-marker/drain guarantees hold throughout. Package metadata is consistent at 1.2.1 with no stale references, the source is unchanged so there is no new runtime regression surface, structure lint is clean, and the gate passes with zero vulnerabilities. The single remaining warning (REQ-006 live-turn delivery) predates this milestone and is out of scope. `saga-audit` does not flip ROADMAP/STATE; the mechanical completion step remains with the executor's `saga-run` after this PASS.
