@@ -3,9 +3,9 @@ saga_state_version: 1.0
 milestone: v1.4.1-real-tui-status-proof
 milestone_name: Real TUI status proof
 status: complete
-stopped_at: v1.4.1 finalized locally; remote release/install is next
-last_updated: "2026-07-25T14:32:13Z"
-last_activity: 2026-07-25 — Final diff/doc/package review and full release gate passed for v1.4.1; local commit prepared.
+stopped_at: REQ-012 CI capture repair locally green; commit/push and fresh CI in progress
+last_updated: "2026-07-25T14:42:34Z"
+last_activity: 2026-07-25 — Moved the genuine-TTY marker into the retained tail and proved it in durable log plus pane capture with the full local gate green.
 ---
 
 # Session State
@@ -13,12 +13,12 @@ last_activity: 2026-07-25 — Final diff/doc/package review and full release gat
 ## Current Position
 Phase/Milestone: v1.4.1-real-tui-status-proof
 Status: complete
-Last activity: 2026-07-25 — Final diff/doc/package review and full release gate passed for v1.4.1; local commit prepared.
+Last activity: 2026-07-25 — Moved the genuine-TTY marker into the retained tail and proved it in durable log plus pane capture with the full local gate green.
 
 ## Active Work
-- v1.4.1 is independently PROVEN, final-review clean, package-dry-run clean, and fully gate-green.
-- Next: explicit operator-approved remote push/tag/release and local installed-extension update.
-- No release mutation has been performed.
+- REQ-012 CI repair is local-gate green and ready to commit/push.
+- Fresh GitHub Actions success remains required before v1.4.1 tag/release/install.
+- No release artifact or installed-extension mutation has occurred.
 
 
 ## Deferred

@@ -143,9 +143,9 @@ try {
 	const capped = await cappedManager.start({
 		name: cappedName,
 		command:
-			"if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then printf 'REQ012_TTY_OK\\n'; else exit 92; fi; " +
+			"if ! [ -t 0 ] || ! [ -t 1 ] || ! [ -t 2 ]; then exit 92; fi; " +
 			"for i in $(seq 1 80); do printf '%01024d\\n' \"$i\"; sleep 0.01; done; " +
-			"printf 'REQ011_NEWEST_MARKER\\n'",
+			"printf 'REQ012_TTY_OK\\nREQ011_NEWEST_MARKER\\n'",
 		cwd: process.cwd(),
 		windowName,
 	});
@@ -164,6 +164,7 @@ try {
 	assert.equal(cappedWaited.job.logTruncated, true);
 	assert.ok((await retainedLogBytes(capped.directory)) <= 4096);
 	const cappedLog = await readFile(join(capped.directory, "output.log"), "utf8");
+	assert.match(cappedLog, /REQ012_TTY_OK/);
 	assert.match(cappedLog, /REQ011_NEWEST_MARKER/);
 	assert.match(cappedLog, /\[tmux-job\] finished=.* exit=0/);
 	assert.equal(await readFile(join(capped.directory, "log-truncated"), "utf8"), "true\n");
