@@ -22,6 +22,8 @@ function job(overrides = {}) {
 		state: "running",
 		maxLogBytes: 0,
 		logTruncated: false,
+		originPane: "%1",
+		acknowledged: false,
 		agent: { backend: "pi", mode: "dispatch" },
 		workspace: { kind: "managed" },
 		...overrides,
@@ -70,6 +72,7 @@ const monitor = startJobStatusSession(
 	tui.ctx,
 	async () => responses.shift()(),
 	{
+		originPane: "%1",
 		schedule: (callback) => {
 			tick = callback;
 			return "timer";

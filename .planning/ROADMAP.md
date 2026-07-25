@@ -9,3 +9,4 @@
 - ✅ **v1.3 Workspace safety** — Agent dispatches understand Git/worktree identity, isolate concurrent writers, fail closed around ambiguous dirty state, and clean up only extension-owned safe worktrees.
 - ✅ **v1.4 Job status widget** — A quiet session-scoped footer and bounded below-editor widget show live owned-job state without noisy polling output or lifecycle leaks.
 - ✅ **v1.4.1 Real TUI status proof** — A real Pi `InteractiveMode` bridge and real tmux job prove rendered running, exited, cleared, and shutdown-clean status behavior.
+- ✅ **v1.5 Parent-scoped quiet status** — Passive status belongs to the originating Pi pane, clean completion expires without closing inspection panes, and failures remain visible until explicitly acknowledged or closed.

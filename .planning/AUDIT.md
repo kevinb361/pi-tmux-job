@@ -402,3 +402,119 @@ PASS
 - Info: the real bridge, `requestRender` seam, own-job scoping, footer-aggregate/pane-close/monitor-stop clauses, resource hygiene, and zero production-source delta are all sound
 
 v1.4.1 passes re-audit. REQ-025 is independently PROVEN: the repaired `test-real-tui-status.mjs` scopes running/exited/close assertions to the test job's own rendered line, requires the real `FooterComponent` to render the currently-published multi-job aggregate, removes only the test's own line on pane close while preserving sibling aggregation, requires empty surfaces only when no siblings remain, and clears both surfaces on monitor stop via a code invariant — and the configured `npm run check` exits 0 from the owned auditor pane with a second concurrent owned sibling genuinely visible to `list()`, the exact condition that produced the historical FAIL. Production source delta is zero, structure lint is clean, and `npm audit` reports zero vulnerabilities. The one warning is a non-blocking test-robustness follow-up. `saga-audit` does not flip ROADMAP/STATE; the mechanical completion step remains with the executor's `saga-run` after this PASS.
+
+---
+
+## Audit: v1.5-parent-scoped-status — 2026-07-25
+
+Auditor: Opus 4.8 (`claude-opus-4-8[1m]`) — independent frontier close-out auditor invoked via `.planning/config.json` `close_out_auditor`. Authored no v1.5 or prior slice. Independence confirmed: this context executed none of the reviewed work; it inspected the delivered working tree.
+
+Scope: v1.5 "Parent-scoped quiet status" — passive footer/widget status belongs to the originating Pi pane, successful completions expire after a bounded interval without closing inspection panes, failures stay attention-visible until explicitly acknowledged or closed, and no visibility transition closes a retained pane or narrows session-wide management (REQ-026).
+
+Files reviewed: 15 files changed, 184 insertions(+), 47 deletions(-) (git diff `227b4cc` — v1.4.1 release — against the working tree; `git diff --check` clean; no untracked source, only `diag-tmp.mjs`, a throwaway audit diagnostic — see Operability). Production delta: `index.ts` (+17), `job-manager.ts` (+35), `job-status.ts` (+23), `job-status-ui.ts` (+7). Test/doc delta: `test-real-tui-status.mjs`, `test-status.mjs`, `test-manager.mjs`, `test-extension.mjs`, `test-status-ui.mjs`, `test-package.mjs`, `README.md`, and the four `.planning/` records.
+
+Gate & lint re-run fresh this audit:
+
+- `run-lint.sh .` (Saga structure lint) → exit 0, no findings.
+- `tsc --noEmit` → exit 0.
+- `npm run check` from the owned auditor pane `%1601` (`@pi_tmux_job_name=v15-closeout-audit`, session `$0`, window `pi-jobs`) → **exit 1, deterministic 4/4**, at `test-real-tui-status.mjs:171`.
+- `env -u TMUX -u TMUX_PANE bash scripts/test-in-tmux.sh` (isolated fresh session) → all twelve suites pass, including `real Pi InteractiveMode … status proof passed`.
+
+### Correctness
+
+- [info] Production behavior for REQ-026 is correct. `job-status.ts:isVisible` (origin filter + `SUCCESS_STATUS_VISIBILITY_MS=30_000` success expiry + acknowledged/attention handling) and `job-manager.ts` (`@pi_tmux_job_origin` tagging at launch `:486`, `originPane`/`completedAt`/`acknowledged` projection `:337-361`, running-refusing non-destructive `acknowledge` `:553-560`) implement the requirement faithfully. Deterministically confirmed by `test-status.mjs` (origin isolation, 29 999 vs 30 001 ms boundary, sticky failure, acknowledged-hide, legacy fallback) — green in the isolated gate.
+
+### Safety
+
+- [info] `acknowledge` refuses `launching`/`running` jobs and only writes a mode-0600 marker file; it never touches the pane. `list`/`resolve`/`close`/`cleanup` remain session-wide, so passive-status scoping never narrows explicit management (verified in `test-manager.mjs`: pane paneId unchanged after ack; `test-extension.mjs`: `list` still returns the acknowledged job). No new destructive path.
+- [info] `completedAt` is the exit-code file mtime (`optionalMtime`), written once at exit — a stable, monotonic-enough proxy for the 30s window. No resource leak introduced.
+
+### Test Coverage
+
+- [critical] **Regression of the v1.4.1 hermeticity hardening — blocks closure.** `test-real-tui-status.mjs:169-172` asserts, unconditionally after closing its own job, that both `footerDataProvider.getExtensionStatuses().has(STATUS_UI_KEY)` and `extensionWidgetsBelow.has(STATUS_WIDGET_KEY)` are `false`. `TmuxJobManager.list()` (`job-manager.ts:326-349`) enumerates every pane in the tmux session carrying `@pi_tmux_job_id`, so any surviving sibling job keeps the aggregate published and the assertion is `true` → exit 1 at `:171`. The v1.4.1 close-out (this file, `## Audit: v1.4.1 …`, historical FAIL then repair) fixed exactly this by gating the empty-surface assertion behind `if (remainingAfterClose.length === 0) { … } else { assert footerRendersPublishedStatus(mode) }`. The v1.5 rewrite of this shared file deleted that guard, reintroducing the previously-blocked critical. This also invalidates REQ-025's PROVEN basis (its cited "gate exits 0 from the owned auditor pane with a sibling visible" no longer holds).
+- [warning] The overstatement recurs in the records: STATE.md and the pre-audit TRACEABILITY rows claimed "full `npm run check` passes all twelve suites" — true only in a no-sibling session, not under the project's own close-out condition (auditor dispatched as a `tmux_job`). The v1.4.1 re-audit explicitly cautioned against this "unconditional full-gate-passes overstatement."
+- [info] Fix is small and test-local (no production change): restore the v1.4.1 sibling-tolerant guard around `:169-172`, or scope the test's manager to a dedicated tmux session/server so `list()` cannot see foreign panes, then reproduce the gate green from the owned auditor pane. Mirrors the accepted v1.4.1 remedy.
+
+### Architecture Fit
+
+- [info] The production changes are additive and cohesive: projection stays a pure function (new `JobStatusProjectionOptions`), the monitor/UI bridge threads `originPane`/`successVisibilityMs` without new coupling, and legacy origin-less panes are intentionally retained (backward compat). No circular deps, no new abstractions in tension.
+- [warning] Behavioral seam worth noting: origin scoping only hides siblings with a **distinct non-empty** origin (`isVisible`: `options.originPane && job.originPane && job.originPane !== options.originPane`). A legacy/origin-less `tmux_job` pane is never filtered — correct for compat, but it means the "unrelated siblings suppressed" property the failing test relies on does not hold for pre-v1.5 panes. Any real user running the gate (or observing passive status) from a session containing a pre-v1.5 job pane sees it, and the gate fails. Not a production defect, but the test encodes an assumption the design deliberately does not guarantee.
+
+### Operability
+
+- [info] `diag-tmp.mjs` (a throwaway diagnostic this auditor wrote to instrument the monitor publish sequence, then could not delete — `rm` is blocked by the sandbox permission policy) remains in the working tree as an untracked file. It is inert (not referenced by the harness). Recommend `rm diag-tmp.mjs` before any commit.
+- [info] The failure is debuggable: deterministic, single assertion line, clear root cause. No logging gap.
+
+### ASSERTED Items from TRACEABILITY.md
+
+- REQ-025 → **downgraded PROVEN → ASSERTED.** The v1.5 rewrite of its own proof regressed the sibling hermeticity; the gate no longer reproduces green from the owned auditor pane. Behavior passes only in an isolated session. Restore-and-reprove to return to PROVEN.
+- REQ-026 → **ASSERTED (not PROVEN).** Projection behavior is located and deterministically reproduced (units + isolated gate), but the requirement's cited `test-real-tui-status.mjs` real-InteractiveMode proof and "full gate exits 0" evidence fail deterministically under the independent close-out condition. No OPEN/WAIVED items.
+
+### Verdict
+
+FAIL
+
+- Critical findings: 1 (test regression reintroducing the v1.4.1 session-wide-singleton fragility; the configured gate exits 1 under the project's own close-out condition — restore the sibling-tolerant guard and reproduce the gate green from the owned auditor pane)
+- Warnings: 3 (records overstate the full-gate result; origin scoping does not suppress legacy origin-less siblings the test assumes suppressed; leftover `diag-tmp.mjs` to remove)
+- Info: production REQ-026 behavior is correct and non-destructive; fix is test-local with zero production-source change
+
+Milestone v1.5 does NOT pass audit and remains open. Production code for parent-scoped quiet status is sound and its behavior is proven in a hermetic session, but the milestone regressed a previously-fixed test-hermeticity guarantee, so the configured full gate is not reproducibly green in the close-out (owned-auditor-pane) environment — the same failure the v1.4.1 audit blocked on. `saga-audit` does not flip ROADMAP/STATE; no completion flip is authorized. Follow-up: restore the v1.4.1-style sibling guard in `test-real-tui-status.mjs` (or isolate the test's tmux session), re-run `npm run check` from an owned auditor pane to confirm exit 0, correct the STATE/TRACEABILITY full-gate wording, and remove `diag-tmp.mjs`; then re-audit.
+
+---
+
+## Audit: v1.5-parent-scoped-status (RE-AUDIT after repair) — 2026-07-25
+
+Auditor: Opus 4.8 (`claude-opus-4-8[1m]`) — independent frontier close-out auditor invoked via `.planning/config.json` `close_out_auditor`. Authored no v1.5 or prior slice. This section is a **second, independent close-out** run after the historical FAIL immediately above (which is retained verbatim and not rewritten), performed after the executor repaired the sibling-hermetic real-TUI assertion.
+
+Scope: v1.5 "Parent-scoped quiet status" — passive footer/widget status belongs to the originating Pi pane, successful completions expire after a bounded interval without closing inspection panes, failures stay attention-visible until explicitly acknowledged or closed, and no visibility transition closes a retained pane or narrows session-wide management (REQ-026); plus REQ-025's real-InteractiveMode proof and a REQ-001…REQ-024 regression sweep. All requirement marks and prior trace labels were treated as claims.
+
+Files reviewed: 16 files changed, 289 insertions(+), 80 deletions(-) vs the milestone-start commit `227b4cc` (v1.4.1 release; `git diff --shortstat`). **Production delta is additive and confined to four files:** `index.ts` (+`acknowledge` action + `originPane` threaded into the monitor), `job-manager.ts` (+`@pi_tmux_job_origin` tag at launch, `originPane`/`completedAt`/`acknowledged` projection, non-destructive `acknowledge`, `originPane` getter), `job-status.ts` (+origin filter, 30 s success expiry, nonzero-exit→attention reclassification), `job-status-ui.ts` (+`originPane`/`successVisibilityMs` threaded into the projection). `job-status-monitor.ts`, `agent-adapters.ts`, `model-registry.ts`, `completion-notifier.ts`, `log-writer.mjs`, `workspace-manager.ts` are **byte-identical to `227b4cc`** (verified `git diff --quiet`). The repair the historical FAIL demanded lives in `test-real-tui-status.mjs`; the remaining delta is test/README/planning.
+
+Independence & adverse condition: confirmed. Live tmux inspection shows this auditor runs inside owned pane `%1663` (`@pi_tmux_job_name=v15-closeout-reaudit`, `@pi_tmux_job_id=v15-closeout-reaudit-ms0pdhbo-ce0627`, `@pi_tmux_job_dir=/home/kevin/.pi/agent/tmux-jobs/v15-closeout-reaudit-ms0pdhbo-ce0627`, `@pi_tmux_job_origin=[empty]`, session `$0`), dispatched by saga-run through the very extension under test. Its id **and** dir are set and its origin tag is **empty**, so it is an owned, **origin-less** running sibling that `TmuxJobManager.list()` (`job-manager.ts:326-361`) enumerates and that the origin filter (`isVisible`) deliberately does **not** hide (legacy-compat). This is precisely the environment — indeed the exact class of sibling — that produced the historical FAIL at `test-real-tui-status.mjs:171`.
+
+Gate & lint re-run fresh this audit, from the owned auditor pane `%1663`:
+
+- `saga-lint .` (Saga structure lint) → exit 0, spine parses clean, no findings.
+- `tsc --noEmit` → exit 0.
+- `npm run check` (the configured gate) → **exit 0, deterministic 3/3** (initial run + 2 reruns): typecheck, all twelve suites including `real Pi InteractiveMode running, exited, closed, and stop status proof passed` and `stable bounded parent-scoped job-status projection tests passed`, and `npm audit --omit=dev` = `found 0 vulnerabilities`. This is the exact invocation path that deterministically exited 1 (4/4) before the repair.
+
+### The prior critical is genuinely fixed — verified, not inferred
+
+- [info] The historical FAIL was an unconditional `assert has(STATUS_UI_KEY) === false` / `has(STATUS_WIDGET_KEY) === false` after closing the test's own job (`test-real-tui-status.mjs:169-172` in the prior tree), which any surviving owned sibling breaks. The repair replaces it with a **sibling-tolerant, origin-aware** guard that reuses the exact production projection: the test threads `originPane: manager.originPane` + `successVisibilityMs: 3_000` into the monitor, waits for its own successful line to quietly expire, asserts the pane is still open (`(await manager.resolve(lifecycleName))?.paneId === waited.job.paneId` — a real REQ-026 non-destructive-expiry check), closes its job, then computes `remainingView = projectJobStatus(await manager.list(), undefined, { originPane, successVisibilityMs })` and asserts **either** cleared surfaces when `remainingView.statusText === undefined` **or** `statusText(mode) === remainingView.statusText` with `footerRendersPublishedStatus(mode) === true` when a survivor remains (`:172-182`).
+- [info] I independently confirmed the sibling-tolerant `else` branch is genuinely exercised (not a trivial no-survivor pass) with a read-only probe replicating the test's manager against the live session: `manager.originPane == "%1663"`; `manager.list()` returns exactly the auditor's own pane `%1663` (`state=running`, `origin=undefined`, `acknowledged=false`); and `projectJobStatus(jobs, undefined, { originPane: "%1663", successVisibilityMs: 3000 }).statusText == "tmux: 1 running"` — non-undefined, so the test takes the surviving-aggregate branch and asserts the real `FooterComponent.render()` contains that aggregate. The origin-less sibling the design intentionally does not filter is thus tolerated by matching the actual projection rather than assuming suppression. The guard is stronger than the v1.4.1 remedy because it is keyed on production's own `projectJobStatus` output.
+- [info] The proof remains genuine where it counts (unchanged from v1.4.1): a real `AgentSession` + `InteractiveMode` built without `init()`/`run()` (no raw-terminal input), driven through the concrete `mode.createExtensionUIContext()`, reading Pi's real `footerDataProvider`/`extensionWidgetsBelow` stores and real `FooterComponent`/Container/Text `.render()`. Replacing `mode.ui.requestRender` with a no-op suppresses only the out-of-scope terminal byte-paint the requirement excludes; data still lands in the real stores and the real component tree is still rendered. Monitor-stop clearing (`:191-194`) rests on the `JobStatusMonitor.stop()` → `{kind:"clear"}` invariant, correct regardless of siblings.
+
+### Correctness — REQ-026 production behavior
+
+- [info] `job-status.ts` implements the requirement faithfully: `isVisible` hides acknowledged jobs, hides foreign non-empty origins (`options.originPane && job.originPane && job.originPane !== options.originPane`) while intentionally retaining origin-less legacy panes, keeps all running/attention jobs, and expires only successful exits after `SUCCESS_STATUS_VISIBILITY_MS = 30_000` using `job.completedAt`. `statusClass` now reclassifies nonzero exits as `attention` (sticky) and only exit 0 as `exited`; `jobMarker` follows. `job-manager.ts` tags each launched pane with `@pi_tmux_job_origin = anchorPane` (`:486`), projects `originPane`/`acknowledged`(marker-presence)/`completedAt`(exit-code file mtime via `optionalMtime`) (`:337-361`), and adds a running-refusing, non-destructive `acknowledge` that writes a mode-0600 `acknowledged` marker and never touches the pane (`:553-560`). `list`/`resolve`/`close`/`cleanup` remain session-wide, so passive scoping never narrows explicit management.
+- [info] Deterministically proven by `test-status.mjs` (origin isolation — `%11` foreign filtered, `%10` owned + origin-less legacy retained; 29 999 ms visible vs 30 001 ms expired boundary; sticky `exit=4`→attention; acknowledged hidden; stable running→attention→exited ordering; expected aggregate `tmux: 2 running · 1 exited · 1 attention`), `test-manager.mjs` (`originPane == manager.originPane`, `acknowledged == false`, finite `completedAt`; `acknowledge` refuses running with `/Refusing to acknowledge running job/`; durable ack; `resolve().paneId` unchanged after ack — pane retained), `test-extension.mjs` (`acknowledge` in the action enum; ack result says "passive status is hidden"/"remains open", `details.job.acknowledged == true`; `list` after ack still returns the job — session-wide management intact), `test-package.mjs` (`acknowledge` present in the packed action enum), and the README reader contract — all green from the owned auditor pane.
+
+### Safety / resource hygiene
+
+- [info] `acknowledge` is non-destructive and refuses `launching`/`running` jobs; it only writes a 0600 marker. No new destructive or model-reachable force path. `completedAt` is the exit-code file mtime, written once at exit — a stable, monotonic-enough 30 s-window proxy. The real-TUI test's `finally` stops the monitor, force-closes owned targets, `mode.stop()`, `session.dispose()`, `modelRuntime.unregisterProvider(...)`, kills the tmux window, and removes the temp root on both pass and failure paths — no Pi/model/tmux/timer/temp leak.
+
+### Architecture Fit / regression
+
+- [info] The production change is additive and cohesive: `projectJobStatus` stays pure (new `JobStatusProjectionOptions`), the UI bridge threads `originPane`/`successVisibilityMs` into the projection without new coupling, and the monitor is untouched. Every non-status core module is byte-identical to `227b4cc`, so the REQ-001…REQ-024 correctness/safety/PTY/drain/cap/completion/workspace posture carries forward by construction and every prior suite re-proves green in the same 12-suite gate with 0 vulnerabilities. The `statusClass` reclassification (nonzero exit → attention) is contained to the projection and consistently reflected in the tests.
+
+### Operability
+
+- [warning] **Package version not bumped.** `package.json`, `extension-manifest.json`, and `package-lock.json` remain at **1.4.1** (unchanged vs the `227b4cc` "record v1.4.1 release" commit), and `test-package.mjs:69` still pins `"1.4.1"`, even though v1.5 adds a new user-facing `acknowledge` tool action plus behavior changes. Every prior milestone bumped the version. This is **not an external collision** — there are no git tags and the package is not published to npm (`npm view` → E404) — and the tarball is internally consistent so the packed-install test passes. But shipping v1.5's surface under the previous milestone's version is a release-identity inconsistency. Bump to `1.5.0` (and update the `test-package.mjs` pin) at the completion commit. Non-blocking for the REQ-025/REQ-026 correctness verdict; a required pre-release hygiene step.
+- [info] `diag-tmp.mjs` (a throwaway diagnostic the first v1.5 auditor wrote and could not delete under the sandbox `rm` policy) remains an inert untracked file, not referenced by the harness. This close-out brief explicitly forbids deleting it, so it is left in place; remove it before any commit.
+- [warning] STATE.md still reads "REQ-025 and REQ-026 remain ASSERTED … until a later explicit loop invocation reruns close-out" and describes the executor's corrective run. This close-out has now run and upgrades both to PROVEN; the executor should reconcile STATE at the ROADMAP/STATE flip (out of auditor authority). The prior audits' "full gate passes" overstatement is now genuinely true from the owned auditor pane (verified 3/3), so the recorded-evidence risk the earlier audits flagged is resolved.
+- [info] Residual test-robustness (carried, non-blocking, already a deferred STATE item): the below-editor widget is bounded to four detail lines + overflow; ≥4 concurrently-running owned siblings sorted before the test's own job could push its line into `… +N more` and time out `jobLine`. It does not trigger under the observed close-out condition (one sibling). A per-test `detailLimit`/self-scope would guarantee the own line stays visible regardless of sibling count.
+
+### ASSERTED Items from TRACEABILITY.md
+
+- REQ-025 → **upgraded ASSERTED → PROVEN.** The prior ASSERTED classification was correct at the time (the v1.5 rewrite had regressed the sibling guard; the gate did not reproduce green from the owned auditor pane). This re-audit locates the repaired evidence and freshly reproduces it green under the exact adverse condition (owned, origin-less sibling `%1663` genuinely visible to `list()`): the gate exits 0 with the real InteractiveMode proof passing and 0 vulnerabilities, deterministic 3/3, and a read-only probe confirms the sibling-tolerant branch is the one exercised.
+- REQ-026 → **upgraded ASSERTED → PROVEN.** Production behavior is located, additive, and non-destructive; deterministically proven by the unit suites; and the requirement's cited real-InteractiveMode proof and full-gate evidence now reproduce green under the independent close-out condition. No OPEN/WAIVED items remain.
+
+### Verdict
+
+PASS
+
+- Critical findings: 0 (the single Critical from the historical FAIL — the test regression reintroducing session-wide-singleton fragility and the in-session gate exiting 1 — is resolved and reproduced resolved; the repaired guard is verified to exercise the sibling-tolerant branch under the live adverse condition)
+- Warnings: 2 (package version left at 1.4.1 for a milestone that adds a new tool action — bump to 1.5.0 before release; STATE.md still describes the pre-repair ASSERTED status and should be reconciled at the flip)
+- Info: the real bridge / `requestRender` seam / own-job scoping / non-destructive expiry+acknowledge / origin filter / resource hygiene are all sound; production delta is additive with every core module byte-identical to `227b4cc`; `diag-tmp.mjs` left in place per brief; residual bounded-widget test-robustness is a deferred non-blocking follow-up
+
+v1.5 passes re-audit. REQ-025 and REQ-026 are independently PROVEN: the repaired `test-real-tui-status.mjs` proves quiet successful-exit expiry keeps the inspection pane open, then guards the post-close surfaces with the production `projectJobStatus` origin-scoped projection — asserting cleared surfaces only when no visible survivor remains and otherwise requiring the real `FooterComponent` to render the true surviving aggregate — and the configured `npm run check` exits 0 deterministically (3/3) from the owned auditor pane with an owned, origin-less sibling genuinely visible to `list()`, the exact condition that produced the historical FAIL. Production source delta is additive with every non-status core module byte-identical to `227b4cc`, all twelve suites and the REQ-001…REQ-024 regression sweep pass, structure lint and typecheck are clean, and `npm audit` reports zero vulnerabilities. The two warnings are pre-release hygiene items (version bump, STATE reconciliation), not correctness defects. `saga-audit` does not flip ROADMAP/STATE; the mechanical completion step (and the version bump + `diag-tmp.mjs` removal) remains with the executor's `saga-run` after this PASS.

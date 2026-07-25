@@ -100,12 +100,18 @@ try {
 	assert.equal(waited.timedOut, false);
 	assert.equal(waited.job.state, "exited");
 	assert.equal(waited.job.exitCode, 0);
+	assert.equal(waited.job.originPane, manager.originPane);
+	assert.equal(waited.job.acknowledged, false);
+	assert.ok(Number.isFinite(waited.job.completedAt));
 	const captured = await manager.capture(completedName, 30);
 	assert.match(captured.output, /tmux-job-smoke-ok/);
 	await manager.send(completedName, "printf 'tmux-job-send-ok\\n'", true);
 	await new Promise((resolve) => setTimeout(resolve, 300));
 	const afterSend = await manager.capture(completedName, 30);
 	assert.match(afterSend.output, /tmux-job-send-ok/);
+	const acknowledged = await manager.acknowledge(completedName);
+	assert.equal(acknowledged.acknowledged, true);
+	assert.equal((await manager.resolve(completedName)).paneId, completed.paneId, "acknowledgment closed the pane");
 	await manager.close(completedName, false);
 	cleanupTargets.splice(cleanupTargets.indexOf(completed.paneId), 1);
 
@@ -215,6 +221,7 @@ try {
 	await new Promise((resolve) => setTimeout(resolve, 500));
 	const timedOut = await manager.wait(runningName, 1);
 	assert.equal(timedOut.timedOut, true);
+	await assert.rejects(manager.acknowledge(runningName), /Refusing to acknowledge running job/);
 	await assert.rejects(manager.close(runningName, false), /Refusing to close running job/);
 	await manager.interrupt(runningName);
 	const interrupted = await manager.wait(runningName, 10);

@@ -1,24 +1,24 @@
 ---
 saga_state_version: 1.0
-milestone: v1.4.1-real-tui-status-proof
-milestone_name: Real TUI status proof
+milestone: v1.5-parent-scoped-status
+milestone_name: Parent-scoped quiet status
 status: complete
-stopped_at: v1.4.1 released and installed; no active milestone
-last_updated: "2026-07-25T14:54:34Z"
-last_activity: 2026-07-25 — Released v1.4.1 at CI-green commit 660627d and updated the configured local Pi package to the same SHA.
+stopped_at: v1.5 independently re-audited PASS; release hygiene remains separate
+last_updated: "2026-07-25T18:50:00Z"
+last_activity: 2026-07-25 — v1.5 passed independent re-audit and mandatory final review; package identity is 1.5.0 and delivery was explicitly approved.
 ---
 
 # Session State
 
 ## Current Position
-Phase/Milestone: v1.4.1-real-tui-status-proof
+Phase/Milestone: v1.5-parent-scoped-status
 Status: complete
-Last activity: 2026-07-25 — Released v1.4.1 at CI-green commit 660627d and updated the configured local Pi package to the same SHA.
+Last activity: 2026-07-25 — Independent re-audit returned PASS; ROADMAP completion marker reconciled.
 
 ## Active Work
-- v1.4.1 release complete: annotated tag and GitHub release resolve to `660627d`; installed package is `1.4.1` at the same SHA and exposes `tmux_job`/`tmux_agent`.
-- Release URL: https://github.com/kevinb361/pi-tmux-job/releases/tag/v1.4.1
-- No active milestone.
+v1.5 delivery is complete in the repository: parent-scoped quiet status and non-destructive acknowledgment are independently PROVEN, package identity consistently reports 1.5.0, and the mandatory final diff/doc review returned PASS.
+Fresh `npm run check` passes all twelve suites with 0 vulnerabilities; Saga lint and `git diff --check` pass. The approved auditor artifact cleanup is complete and the tree has no untracked files.
+Commit, push, and documented GitHub installation were explicitly approved by the operator.
 
 
 ## Deferred

@@ -37,6 +37,7 @@ const ACTIONS = [
 	"wait",
 	"send",
 	"interrupt",
+	"acknowledge",
 	"close",
 	"cleanup-workspace",
 ] as const;
@@ -97,7 +98,7 @@ export default function (pi: ExtensionAPI) {
 	let statusMonitor: ReturnType<typeof startJobStatusSession>;
 	pi.on("session_start", (_event, ctx) => {
 		statusMonitor?.stop();
-		statusMonitor = startJobStatusSession(ctx, () => manager.list());
+		statusMonitor = startJobStatusSession(ctx, () => manager.list(), { originPane: manager.originPane });
 	});
 	pi.on("session_shutdown", () => {
 		notifier.shutdown();
@@ -111,9 +112,9 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Run and manage observable commands in Pi-owned panes in a dedicated tmux window. " +
 			"Use start for long-running or user-visible commands, list/status/tail/wait to monitor them, " +
-			"send for interactive input, interrupt for Ctrl-C, close to remove a pane, and cleanup-workspace for owned agent worktrees. " +
+			"send for interactive input, interrupt for Ctrl-C, acknowledge to hide stopped-job passive status without closing its pane, close to remove a pane, and cleanup-workspace for owned agent worktrees. " +
 			"start requires name and command. All actions except start/list require target (job name, id, or pane id). " +
-			"send requires text. close refuses running jobs unless force=true. cleanup-workspace refuses running, non-managed, or unowned workspaces and preserves dirty trees. Output is limited to 50KB/2000 lines.",
+			"send requires text. acknowledge refuses running jobs. close refuses running jobs unless force=true. cleanup-workspace refuses running, non-managed, or unowned workspaces and preserves dirty trees. Output is limited to 50KB/2000 lines.",
 		promptSnippet: "Run and monitor long-lived commands in visible Pi-owned tmux panes",
 		promptGuidelines: [
 			"Use tmux_job instead of background bash when a command is long-running, interactive, or the user asks to watch it live.",
@@ -242,6 +243,19 @@ export default function (pi: ExtensionAPI) {
 					const job = await manager.interrupt(target, signal);
 					return {
 						content: [{ type: "text", text: `Sent Ctrl-C to ${job.name} (${job.paneId}).` }],
+						details: { job },
+					};
+				}
+				case "acknowledge": {
+					const target = requireParameter(params.target, "target");
+					const job = await manager.acknowledge(target, signal);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Acknowledged ${job.name}; passive status is hidden and pane ${job.paneId} remains open.`,
+							},
+						],
 						details: { job },
 					};
 				}

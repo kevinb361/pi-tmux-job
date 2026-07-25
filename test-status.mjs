@@ -68,7 +68,50 @@ assert.equal(projectJobStatus(jobs, 0).widgetLines[0], "… +4 more");
 const failedExit = projectJobStatus([
 	job({ id: "failed-1", name: "failed", state: "exited", exitCode: 9 }),
 ]);
-assert.equal(failedExit.statusText, "tmux: 1 exited");
+assert.equal(failedExit.statusText, "tmux: 1 attention");
 assert.deepEqual(failedExit.widgetLines, ["! failed · cmd · exit=9 · workspace=-"]);
 
-console.log("stable bounded job-status projection tests passed");
+const now = 50_000;
+const scoped = projectJobStatus(
+	[
+		job({ id: "owned-running", name: "owned-running", originPane: "%10" }),
+		job({ id: "foreign-running", name: "foreign-running", originPane: "%11" }),
+		job({
+			id: "fresh-success",
+			name: "fresh-success",
+			originPane: "%10",
+			state: "exited",
+			exitCode: 0,
+			completedAt: now - 29_999,
+		}),
+		job({
+			id: "old-success",
+			name: "old-success",
+			originPane: "%10",
+			state: "exited",
+			exitCode: 0,
+			completedAt: now - 30_001,
+		}),
+		job({
+			id: "owned-failure",
+			name: "owned-failure",
+			originPane: "%10",
+			state: "exited",
+			exitCode: 4,
+			completedAt: now - 90_000,
+		}),
+		job({ id: "acknowledged", name: "acknowledged", originPane: "%10", state: "exited", exitCode: 4, acknowledged: true }),
+		job({ id: "legacy", name: "legacy" }),
+	],
+	4,
+	{ originPane: "%10", now },
+);
+assert.equal(scoped.statusText, "tmux: 2 running · 1 exited · 1 attention");
+assert.deepEqual(scoped.widgetLines, [
+	"▶ legacy · cmd · running · workspace=-",
+	"▶ owned-running · cmd · running · workspace=-",
+	"! owned-failure · cmd · exit=4 · workspace=-",
+	"✓ fresh-success · cmd · exit=0 · workspace=-",
+]);
+
+console.log("stable bounded parent-scoped job-status projection tests passed");

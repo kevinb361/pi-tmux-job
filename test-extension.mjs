@@ -77,6 +77,7 @@ assert.ok(!("max_log_bytes" in agentTool.parameters.properties));
 assert.ok(!("maxLogBytes" in agentTool.parameters.properties));
 assert.deepEqual(agentTool.parameters.properties.intent.enum, ["read", "write"]);
 assert.ok(tool.parameters.properties.action.enum.includes("cleanup-workspace"));
+assert.ok(tool.parameters.properties.action.enum.includes("acknowledge"));
 assert.deepEqual(agentTool.parameters.properties.workspace.enum, ["auto", "current", "worktree"]);
 assert.match(agentTool.description, /intent declares read-only or writer behavior/);
 assert.match(agentTool.description, /Hermes one-shot mode exposes its prompt in argv/);
@@ -105,6 +106,11 @@ try {
 	const text = waited.content.map((item) => item.text ?? "").join("\n");
 	assert.match(text, /extension-tool-ok/);
 	assert.match(text, /exit=0/);
+	const acknowledged = await call("acknowledge", { action: "acknowledge", target: name });
+	assert.match(acknowledged.content[0].text, /passive status is hidden/);
+	assert.match(acknowledged.content[0].text, /remains open/);
+	assert.equal(acknowledged.details.job.acknowledged, true);
+	assert.ok((await call("list-after-ack", { action: "list" })).details.jobs.some((job) => job.name === name));
 	await call("close", { action: "close", target: name });
 	openTargets.delete(name);
 

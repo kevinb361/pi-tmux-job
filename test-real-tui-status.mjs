@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { TmuxJobManager } from "./job-manager.ts";
+import { projectJobStatus } from "./job-status.ts";
 import { startJobStatusSession } from "./job-status-ui.ts";
 import { STATUS_UI_KEY, STATUS_WIDGET_KEY } from "./job-status-ui.ts";
 
@@ -140,7 +141,11 @@ try {
 		windowName,
 	});
 	openTargets.add(lifecycleName);
-	monitor = startJobStatusSession({ mode: "tui", ui }, () => manager.list(), { intervalMs: 100 });
+	monitor = startJobStatusSession(
+		{ mode: "tui", ui },
+		() => manager.list(),
+		{ intervalMs: 100, originPane: manager.originPane, successVisibilityMs: 3_000 },
+	);
 	assert.ok(monitor);
 
 	await waitUntil(
@@ -156,18 +161,23 @@ try {
 		() => jobLine(mode, lifecycleName)?.includes("cmd · exit=0") && footerRendersPublishedStatus(mode),
 		"real InteractiveMode did not render the owned exited job in its footer/widget surfaces",
 	);
+	await waitUntil(
+		() => !jobLine(mode, lifecycleName),
+		"real InteractiveMode did not quietly expire the successful job from passive status",
+	);
+	assert.equal((await manager.resolve(lifecycleName))?.paneId, waited.job.paneId, "status expiry closed the pane");
 
 	await manager.close(lifecycleName, false);
 	openTargets.delete(lifecycleName);
-	await waitUntil(
-		() => !jobLine(mode, lifecycleName),
-		"real InteractiveMode did not remove the owned job from the widget after pane close",
-	);
-	const remainingAfterClose = await manager.list();
-	if (remainingAfterClose.length === 0) {
+	const remainingView = projectJobStatus(await manager.list(), undefined, {
+		originPane: manager.originPane,
+		successVisibilityMs: 3_000,
+	});
+	if (remainingView.statusText === undefined) {
 		assert.equal(mode.footerDataProvider.getExtensionStatuses().has(STATUS_UI_KEY), false);
 		assert.equal(mode.extensionWidgetsBelow.has(STATUS_WIDGET_KEY), false);
 	} else {
+		assert.equal(statusText(mode), remainingView.statusText);
 		assert.equal(footerRendersPublishedStatus(mode), true);
 	}
 

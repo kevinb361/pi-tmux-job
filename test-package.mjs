@@ -66,7 +66,7 @@ try {
 	const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 	const manifest = JSON.parse(await readFile(join(packageRoot, "extension-manifest.json"), "utf8"));
 	const readme = await readFile(join(packageRoot, "README.md"), "utf8");
-	assert.equal(packageJson.version, "1.4.1");
+	assert.equal(packageJson.version, "1.5.0");
 	assert.deepEqual(packageJson.pi.extensions, ["./index.ts"]);
 	assert.equal(manifest.version, packageJson.version);
 	assert.deepEqual(manifest.provides.tools, ["tmux_job", "tmux_agent"]);
@@ -117,6 +117,9 @@ try {
 	assert.ok(extension.tools.has("tmux_agent"));
 	assert.ok(
 		extension.tools.get("tmux_job").definition.parameters.properties.action.enum.includes("cleanup-workspace"),
+	);
+	assert.ok(
+		extension.tools.get("tmux_job").definition.parameters.properties.action.enum.includes("acknowledge"),
 	);
 	assert.deepEqual(extension.tools.get("tmux_agent").definition.parameters.properties.workspace.enum, [
 		"auto",

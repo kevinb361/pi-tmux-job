@@ -1,4 +1,5 @@
 import type { TmuxPaneJob } from "./job-manager.ts";
+import { projectJobStatus } from "./job-status.ts";
 import {
 	JobStatusMonitor,
 	type JobStatusMonitorOptions,
@@ -23,7 +24,7 @@ interface JobStatusUiContext {
 
 type MonitorOverrides = Partial<
 	Pick<JobStatusMonitorOptions, "intervalMs" | "project" | "schedule" | "cancel">
->;
+> & { originPane?: string; successVisibilityMs?: number };
 
 function clearStatusUi(ctx: JobStatusUiContext): void {
 	ctx.ui.setStatus(STATUS_UI_KEY, undefined);
@@ -54,8 +55,12 @@ export function startJobStatusSession(
 	overrides: MonitorOverrides = {},
 ): JobStatusMonitor | undefined {
 	if (ctx.mode !== "tui") return undefined;
+	const { originPane, successVisibilityMs, ...monitorOverrides } = overrides;
 	const monitor = new JobStatusMonitor({
-		...overrides,
+		...monitorOverrides,
+		project:
+			monitorOverrides.project ??
+			((jobs) => projectJobStatus(jobs, undefined, { originPane, successVisibilityMs })),
 		listJobs,
 		publish: (update) => applyJobStatusUpdate(ctx, update),
 	});

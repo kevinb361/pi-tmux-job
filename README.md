@@ -58,6 +58,7 @@ Supported actions:
 | `wait` | Wait for the command phase to finish, with a bounded timeout |
 | `send` | Send literal input and optionally press Enter |
 | `interrupt` | Send Ctrl-C |
+| `acknowledge` | Hide a stopped job from passive status without closing its pane |
 | `close` | Close a completed pane; running jobs require `force=true` |
 | `cleanup-workspace` | Safely remove a stopped agent job's verified managed worktree; no force override |
 
@@ -86,10 +87,12 @@ Dispatch returns immediately and sends one bounded completion message back to th
 
 In interactive TUI mode, the extension adds two quiet status surfaces without replacing Pi's footer or editor:
 
-- A footer item summarizes owned panes as running, exited, or attention-needed.
-- A below-editor widget shows active jobs first, then other open jobs, including name, agent backend/mode or generic command identity, state/exit, workspace kind, and log truncation.
+- A footer item summarizes panes launched by that Pi terminal as running, recently exited successfully, or attention-needed.
+- A below-editor widget shows active jobs first, then attention items and recent successful exits, including name, agent backend/mode or generic command identity, state/exit, workspace kind, and log truncation.
 
-The widget shows at most four job lines plus an explicit overflow count. Exited jobs remain visible while their panes remain open; closing the pane removes them from the next refresh. When no owned panes exist, both surfaces disappear. Polling refreshes immediately and then once per second, never overlaps itself, and updates the UI only when the projected status changes. A polling failure shows one compact `tmux: unavailable` footer state rather than repeated notifications.
+Each new job is tagged with its originating Pi pane. Passive footer/widget status filters to that origin, so another Pi TUI in the same tmux session does not inherit unrelated status; explicit `list`, `status`, and lifecycle controls remain session-wide. Historical panes without an origin tag remain visible for compatibility.
+
+The widget shows at most four job lines plus an explicit overflow count. Successful exits remain visible for 30 seconds and then quietly disappear while their panes and logs remain available for inspection. Failed exits and other attention states remain visible until `acknowledge` or pane close; acknowledgment never closes the pane. Polling refreshes immediately and then once per second, never overlaps itself, and updates the UI only when the projected status changes. A polling failure shows one compact `tmux: unavailable` footer state rather than repeated notifications.
 
 Monitoring starts only from a TUI `session_start`. RPC, JSON, and print modes start no timer or tmux polling. Reload, session replacement, and shutdown cancel the session timer, clear both surfaces, and suppress late asynchronous updates.
 
@@ -172,7 +175,7 @@ Dispatch two writer agents with workspace=auto. Keep their changes isolated, sho
 - Tmux-native pane logging keeps commands out of a `tee` pipeline. Unlimited mode preserves the full initial-command log.
 - Operators may set `PI_TMUX_JOB_MAX_LOG_BYTES` to a positive byte count to retain only the newest chronological bytes per job; unset or `0` keeps unlimited logs. Agent tools cannot override this policy.
 - When capped output discards older bytes, job status shows `log=truncated:<bytes>`, tool results include a retention warning, and the job directory contains `log-truncated`.
-- Completed panes remain open at a shell for inspection and therefore remain represented by live TUI status until closed.
+- Completed panes remain open at a shell for inspection. Passive TUI status hides successful exits after 30 seconds and acknowledged stopped jobs immediately without closing those panes.
 - Each job records its command, metadata, state, exit code, and retained initial-command log under:
 
 ```text
@@ -193,6 +196,7 @@ Dispatch two writer agents with workspace=auto. Keep their changes isolated, sho
 - **Automatic writer launch refused as dirty:** commit or stash the requested tree, choose another clean worktree, or explicitly use `workspace=current` only when sharing that exact dirty tree is intentional.
 - **Cleanup preserved a workspace:** inspect the reported path. Commit or remove dirty changes before retrying; committed branches are intentionally retained after cleanup.
 - **Footer shows `tmux: unavailable`:** tmux polling failed. The monitor retries quietly; use `tmux_job list` for the full error if the state persists.
+- **A completed job disappeared from the footer:** successful exits leave passive status after 30 seconds but remain available through `tmux_job list`, `status`, `tail`, and their retained pane/log.
 - **No live status in RPC/JSON/print mode:** expected—the monitor is intentionally TUI-only and starts no background timer in non-interactive modes.
 - **Dispatch survives reload without notifying:** expected—the tmux job continues, but session-scoped watchers are cancelled on reload or shutdown. Inspect it with `tmux_job list/status/wait`.
 - **Full command output needed:** read the retained `output.log` path reported by the tool; model-facing output remains bounded. If `log-truncated` exists, output before the retained chronological tail is no longer available.

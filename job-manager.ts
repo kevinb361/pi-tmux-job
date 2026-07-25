@@ -41,6 +41,9 @@ export interface TmuxPaneJob {
 	state: string;
 	maxLogBytes: number;
 	logTruncated: boolean;
+	originPane?: string;
+	acknowledged: boolean;
+	completedAt?: number;
 	workspace?: JobWorkspaceMetadata;
 	agent?: AgentJobMetadata;
 	exitCode?: number;
@@ -99,6 +102,15 @@ function parseMaxLogBytes(value: string | number | undefined): number {
 async function readOptional(path: string): Promise<string | undefined> {
 	try {
 		return (await readFile(path, "utf8")).trim();
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
+async function optionalMtime(path: string): Promise<number | undefined> {
+	try {
+		return (await stat(path)).mtimeMs;
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
 		throw error;
@@ -280,6 +292,10 @@ export class TmuxJobManager {
 		this.logWriterPath = options.logWriterPath ?? DEFAULT_LOG_WRITER_PATH;
 	}
 
+	get originPane(): string {
+		return this.anchorPane;
+	}
+
 	async ensureAvailable(signal?: AbortSignal): Promise<string> {
 		if (!process.env.TMUX || !this.anchorPane) {
 			throw new Error("tmux_job requires Pi to be running inside tmux");
@@ -310,6 +326,7 @@ export class TmuxJobManager {
 			"#{@pi_tmux_job_id}",
 			"#{@pi_tmux_job_name}",
 			"#{@pi_tmux_job_dir}",
+			"#{@pi_tmux_job_origin}",
 		].join(FIELD_SEPARATOR);
 		const result = await this.exec("tmux", ["list-panes", "-a", "-F", format], {
 			signal,
@@ -320,14 +337,15 @@ export class TmuxJobManager {
 		const jobs: TmuxPaneJob[] = [];
 		for (const line of result.stdout.split("\n")) {
 			if (!line) continue;
-			const [rowSession, windowId, paneId, title, currentCommand, id, name, directory] = line.split(
-				FIELD_SEPARATOR,
-			);
+			const [rowSession, windowId, paneId, title, currentCommand, id, name, directory, originPane] =
+				line.split(FIELD_SEPARATOR);
 			if (rowSession !== sessionId || !id || !directory) continue;
 			const state = (await readOptional(resolve(directory, "state"))) ?? "unknown";
-			const rawExit = await readOptional(resolve(directory, "exit-code"));
+			const exitPath = resolve(directory, "exit-code");
+			const rawExit = await readOptional(exitPath);
 			const metadata = await readJobMetadata(directory);
 			const logTruncated = (await readOptional(resolve(directory, "log-truncated"))) === "true";
+			const acknowledged = (await readOptional(resolve(directory, "acknowledged"))) !== undefined;
 			jobs.push({
 				sessionId: rowSession,
 				windowId,
@@ -340,6 +358,9 @@ export class TmuxJobManager {
 				state,
 				maxLogBytes: metadata.maxLogBytes,
 				logTruncated,
+				originPane: originPane || undefined,
+				acknowledged,
+				completedAt: rawExit === undefined ? undefined : await optionalMtime(exitPath),
 				workspace: metadata.workspace,
 				agent: metadata.agent,
 				exitCode: rawExit === undefined ? undefined : parseExitCode(rawExit),
@@ -462,6 +483,7 @@ export class TmuxJobManager {
 			["@pi_tmux_job_id", id],
 			["@pi_tmux_job_name", options.name],
 			["@pi_tmux_job_dir", directory],
+			["@pi_tmux_job_origin", this.anchorPane],
 		] as const) {
 			const tagged = await this.exec("tmux", ["set-option", "-p", "-t", paneId, key, value], {
 				signal: options.signal,
@@ -526,6 +548,15 @@ export class TmuxJobManager {
 		});
 		if (result.code !== 0) throw new Error(`Unable to interrupt ${job.paneId}: ${result.stderr.trim()}`);
 		return (await this.resolve(job.paneId, signal)) ?? job;
+	}
+
+	async acknowledge(target: string, signal?: AbortSignal): Promise<TmuxPaneJob> {
+		const job = await this.requireJob(target, signal);
+		if (["launching", "running"].includes(job.state)) {
+			throw new Error(`Refusing to acknowledge running job ${job.name}`);
+		}
+		await writeFile(resolve(job.directory, "acknowledged"), `${new Date().toISOString()}\n`, { mode: 0o600 });
+		return (await this.resolve(job.paneId, signal)) ?? { ...job, acknowledged: true };
 	}
 
 	async close(target: string, force: boolean, signal?: AbortSignal): Promise<TmuxPaneJob> {

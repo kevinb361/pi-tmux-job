@@ -1,6 +1,7 @@
 import type { TmuxPaneJob } from "./job-manager.ts";
 
 export const DEFAULT_STATUS_DETAIL_LIMIT = 4;
+export const SUCCESS_STATUS_VISIBILITY_MS = 30_000;
 
 export interface JobStatusView {
 	statusText?: string;
@@ -8,12 +9,27 @@ export interface JobStatusView {
 	key: string;
 }
 
+export interface JobStatusProjectionOptions {
+	originPane?: string;
+	now?: number;
+	successVisibilityMs?: number;
+}
+
 type StatusClass = "running" | "exited" | "attention";
 
 function statusClass(job: TmuxPaneJob): StatusClass {
 	if (["launching", "running"].includes(job.state)) return "running";
-	if (job.state === "exited") return "exited";
+	if (job.state === "exited" && job.exitCode === 0) return "exited";
 	return "attention";
+}
+
+function isVisible(job: TmuxPaneJob, options: JobStatusProjectionOptions): boolean {
+	if (job.acknowledged) return false;
+	if (options.originPane && job.originPane && job.originPane !== options.originPane) return false;
+	if (statusClass(job) !== "exited" || job.completedAt === undefined) return true;
+	const now = options.now ?? Date.now();
+	const visibilityMs = Math.max(0, options.successVisibilityMs ?? SUCCESS_STATUS_VISIBILITY_MS);
+	return now - job.completedAt <= visibilityMs;
 }
 
 function compareJobs(left: TmuxPaneJob, right: TmuxPaneJob): number {
@@ -27,7 +43,7 @@ function compareJobs(left: TmuxPaneJob, right: TmuxPaneJob): number {
 
 function jobMarker(job: TmuxPaneJob): string {
 	if (statusClass(job) === "running") return "▶";
-	if (job.state === "exited" && job.exitCode === 0) return "✓";
+	if (statusClass(job) === "exited") return "✓";
 	return "!";
 }
 
@@ -55,17 +71,19 @@ function detailLine(job: TmuxPaneJob): string {
 export function projectJobStatus(
 	jobs: TmuxPaneJob[],
 	detailLimit = DEFAULT_STATUS_DETAIL_LIMIT,
+	options: JobStatusProjectionOptions = {},
 ): JobStatusView {
-	if (jobs.length === 0) return { statusText: undefined, widgetLines: [], key: "" };
+	const visibleJobs = jobs.filter((job) => isVisible(job, options));
+	if (visibleJobs.length === 0) return { statusText: undefined, widgetLines: [], key: "" };
 
 	const counts: Record<StatusClass, number> = { running: 0, exited: 0, attention: 0 };
-	for (const job of jobs) counts[statusClass(job)] += 1;
+	for (const job of visibleJobs) counts[statusClass(job)] += 1;
 	const countParts = (["running", "exited", "attention"] as const)
 		.filter((kind) => counts[kind] > 0)
 		.map((kind) => `${counts[kind]} ${kind}`);
 	const statusText = `tmux: ${countParts.join(" · ")}`;
 
-	const ordered = [...jobs].sort(compareJobs);
+	const ordered = [...visibleJobs].sort(compareJobs);
 	const boundedLimit = Math.max(0, Math.floor(detailLimit));
 	const widgetLines = ordered.slice(0, boundedLimit).map(detailLine);
 	if (ordered.length > boundedLimit) widgetLines.push(`… +${ordered.length - boundedLimit} more`);
