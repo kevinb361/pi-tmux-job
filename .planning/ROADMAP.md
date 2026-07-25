@@ -8,3 +8,4 @@
 - ✅ **v1.2.2 Live completion proof** — A real in-memory Pi AgentSession proves dispatch completion enters the originating session exactly once and triggers a follow-up turn, while shutdown suppresses late delivery.
 - ✅ **v1.3 Workspace safety** — Agent dispatches understand Git/worktree identity, isolate concurrent writers, fail closed around ambiguous dirty state, and clean up only extension-owned safe worktrees.
 - ✅ **v1.4 Job status widget** — A quiet session-scoped footer and bounded below-editor widget show live owned-job state without noisy polling output or lifecycle leaks.
+- ✅ **v1.4.1 Real TUI status proof** — A real Pi `InteractiveMode` bridge and real tmux job prove rendered running, exited, cleared, and shutdown-clean status behavior.

@@ -93,6 +93,8 @@ The widget shows at most four job lines plus an explicit overflow count. Exited 
 
 Monitoring starts only from a TUI `session_start`. RPC, JSON, and print modes start no timer or tmux polling. Reload, session replacement, and shutdown cancel the session timer, clear both surfaces, and suppress late asynchronous updates.
 
+A real Pi `InteractiveMode` integration test drives real owned tmux panes through running, exited, pane-close, and monitor-stop transitions and inspects Pi's actual footer and below-editor widget component rendering. It constructs the interactive bridge without starting raw terminal input.
+
 Pi model selection is validated against the live output of `pi --list-models` before launch. Use exact identifiers, for example `openai-codex/gpt-5.6-sol`, `litellm/deep`, `litellm/deep-think`, or `litellm/fast`. GPT and local LiteLLM models run through the Pi harness; this package does not launch Codex CLI.
 
 ### Workspace safety
@@ -219,7 +221,7 @@ npm install
 npm run check
 ```
 
-The integration tests create harmless short-lived panes and temporary Git repositories. They verify start, duplicate-name rejection, waiting, output capture, input, interruption, continuously bounded logging, package installation, agent lifecycle behavior, workspace policy and concurrent-writer isolation, managed creation/rollback/cleanup preservation, stable bounded status projection, non-overlapping TUI-only monitoring and cleanup, exactly-once completion delivery into a real Pi AgentSession follow-up turn, and reload suppression of late notifications. When not already inside tmux, the test harness creates and removes a temporary tmux session.
+The integration tests create harmless short-lived panes and temporary Git repositories. They verify start, duplicate-name rejection, waiting, output capture, input, interruption, continuously bounded logging, package installation, agent lifecycle behavior, workspace policy and concurrent-writer isolation, managed creation/rollback/cleanup preservation, stable bounded status projection, non-overlapping TUI-only monitoring and cleanup, real Pi InteractiveMode footer/widget rendering, exactly-once completion delivery into a real Pi AgentSession follow-up turn, and reload suppression of late notifications. When not already inside tmux, the test harness creates and removes a temporary tmux session.
 
 `npm run check` audits the production package surface with `npm audit --omit=dev`. The Pi SDK packages are peer/dev dependencies used for typing and tests, not shipped runtime dependencies; assess any full-tree audit findings against the pinned upstream Pi SDK separately.
 

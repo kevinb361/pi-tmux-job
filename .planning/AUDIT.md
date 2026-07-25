@@ -298,3 +298,107 @@ PASS
 - Info: correctness/safety/architecture/operability notes on the additive delta, pure projection, generation-based leak safety, factory no-timer proof, non-TUI inertness, and dependency structure
 
 v1.4 is closure-ready. Every new requirement (REQ-020 additive backend/mode metadata, REQ-021 stable bounded projection, REQ-022 non-overlapping leak-free monitor, REQ-023 non-replacing footer/widget integration, REQ-024 documented/packaged/regression-proven) is independently PROVEN with located, freshly reproduced evidence; the production delta is additive-only and every prior REQ-001…REQ-019 regression suite passes clean with zero vulnerabilities; the monitor's overlap/late-result/leak guarantees are code invariants proven by a fake-scheduler suite; the extension factory starts no background timer and non-TUI modes are inert; and the real Pi SDK UI/event contract matches the bridge by inspection. The single warning is a test-surface gap over a contract confirmed by inspection, not a defect. `saga-audit` does not flip ROADMAP/STATE; the mechanical completion step remains with the executor's `saga-run` after this PASS.
+
+---
+
+## Audit: v1.4.1-real-tui-status-proof — 2026-07-25
+
+Auditor: Claude Opus 4.8 (`claude-opus-4-8[1m]`), independent frontier close-out auditor invoked via `.planning/config.json` `close_out_auditor`. Authored no v1.1/v1.2/v1.2.1/v1.2.2/v1.3/v1.4/v1.4.1 slice.
+Scope: v1.4.1 "Real TUI status proof" — a real Pi `InteractiveMode` bridge and real tmux job proving rendered running, exited, pane-close-cleared, and monitor-stop-cleared status behavior without raw terminal startup or resource leaks (REQ-025).
+Files reviewed: 11 files changed, 208 insertions(+), 19 deletions(-) vs the milestone-start commit `85489a3` (git diff --shortstat). Production source delta is **zero** (`index.ts` and all `job-*.ts`/adapters unchanged); the milestone is the new proof `test-real-tui-status.mjs` (+180), its harness wiring (`scripts/test-in-tmux.sh` +1), `test-package.mjs` (+2 README assertions, version 1.4.1), README (+1 paragraph + test-list line), version bumps to 1.4.1 (`package.json`, `extension-manifest.json`, `package-lock.json`), and planning files.
+
+Method: read STATE/ROADMAP/REQUIREMENTS/TRACEABILITY and both saga skills; inspected the pinned Pi SDK 0.81.1 `InteractiveMode` internals (`node_modules/.../interactive-mode.{d.ts,js}`) to verify the seams the test pokes; re-ran the structure lint and the gate fresh via both invocation paths; instrumented the real `InteractiveMode` footer/widget storage with a throwaway replica to isolate the failure (removed after use). No implementation, test, package, README, ROADMAP, REQUIREMENTS, or STATE file was edited.
+
+### Correctness
+
+- [info] The proof is genuine where it counts. The test drives the _real_ extension UI context (`mode.createExtensionUIContext()`, `interactive-mode.js:1656` — the same object Pi hands extensions), and reads Pi's _real_ stores and renderers: `setStatus`→`setExtensionStatus`→`footerDataProvider.setExtensionStatus` (`interactive-mode.js`), `setWidget(...belowEditor)`→`setExtensionWidget` which wraps the extension's lines in a real `Container`/`Text` component tree (`interactive-mode.js:1455-1487`), and `mode.footer` = real `FooterComponent`. Instrumentation confirms the running→exited transition renders exactly the expected `▶ … · cmd · running` and `✓ … · cmd · exit=0` content. FooterComponent and below-editor widget rendering are authentically exercised. `InteractiveMode` is constructed without `init()`/`run()`, so no raw terminal input is started (constructor builds `new TUI(new ProcessTerminal())` but never enters raw mode) — the requirement's "without starting raw terminal input" clause holds.
+- [info] Replacing `ui.requestRender` with a no-op does **not** materially weaken the proof. `setExtensionStatus` and `renderWidgets` (`interactive-mode.js:1535-1541`) call `this.ui.requestRender()` only to schedule a terminal byte-paint; the data still lands in `footerDataProvider`/`extensionWidgetsBelow` and the component tree is still built. The test then invokes the real components' `.render(width)` directly. Only Pi's internal terminal diff/paint pipeline is skipped — which requires a live TTY the requirement explicitly excludes. The seam is the correct, minimal suppression of an out-of-scope side effect, not a shortcut that fakes the render.
+- [critical] **The proof is non-hermetic and its assertions are mis-scoped.** `TmuxJobManager.list()` (`job-manager.ts:302-349`) enumerates every pane in the manager's tmux session (`tmux list-panes -a`, filtered to `rowSession === sessionId` + the `@pi_tmux_job_id`/`@pi_tmux_job_dir` ownership options), returning _all_ owned jobs in the session. `test-real-tui-status.mjs` asserts session-wide singleton counts — `/tmux: 1 running/` (line 129), `status.includes("tmux: 1 exited")` (line 137), `rendered(mode.footer)` `/tmux: 1 exited/` (line 140) — and requires the status map to go empty after closing its single job (lines 144-149). Any second owned job in the session breaks all of them. The exited-widget branch (`rendered(widget).includes("exit=0")`, line 138) would also match the wrong job. The widget-content checks are already scoped by `lifecycleName`, but the footer/clear checks are not.
+
+### Safety
+
+- [info] Resource hygiene is sound. The `finally` block stops the monitor, force-closes any still-open tmux targets, calls `mode.stop()`, `session.dispose()`, `modelRuntime.unregisterProvider(...)`, kills the tmux window, and removes the temp root. No Pi/model/tmux/timer/temp leak on either the pass or the assertion-failure path (verified — a failing run still tears the window and temp dir down).
+- [warning] The milestone's production behavior is correct and, if anything, the test under-proves it: the footer legitimately aggregates _all_ owned jobs (`tmux: 1 running · 1 exited` observed), which is the headline value of a multi-job status widget. The proof only ever asserts the single-job case and actively breaks when the multi-job case it should showcase occurs.
+
+### Test Coverage
+
+- [critical] The gate result is **invocation-dependent**, and it is RED in the environment where close-out runs:
+  - Isolated-session path (harness spawns its own temp tmux session; `npm run check` from a non-tmux shell): all **12/12** suites pass, including `real Pi InteractiveMode running, exited, closed, and stop status proof passed`. Reproduced fresh (`env -u TMUX -u TMUX_PANE bash scripts/test-in-tmux.sh`). This is the executor's "gate green" path and it is legitimate.
+  - In-session path (`npm run check` invoked inside a tmux session already holding a sibling owned pi-tmux job): the configured gate exits **1** deterministically (3/3 standalone + the gate) at `test-real-tui-status.mjs:135` — "real InteractiveMode did not render exited footer/widget state". Seven suites pass before the abort (`set -euo pipefail`); `npm audit` is never reached.
+  - The close-out itself triggers the failure: this auditor process runs inside an owned pane (`@pi_tmux_job_name=v141-closeout-audit`, `@pi_tmux_job_id=v141-closeout-audit-ms09706t-…`, session `$0`) that saga-run dispatched through the very extension under test, so `list()` reports two running jobs. The same failure occurs for any user who runs `npm run check` from a tmux session while a `tmux_agent`/`tmux_job` is live — a first-class use of this extension.
+- [info] Underlying feature coverage remains strong: the pure projection (`test-status.mjs`), monitor lifecycle (`test-status-monitor.mjs`), and UI bridge against a typed fake (`test-status-ui.mjs`) all pass; this milestone's new test correctly closes the v1.4 audit's "typed-fake only" warning by exercising the real InteractiveMode — it just does so with mis-scoped assertions.
+
+### Architecture Fit
+
+- [info] Reaching Pi's `private` fields (`mode.ui`, `mode.footer`, `mode.footerDataProvider`, `mode.extensionWidgetsBelow`, `mode.createExtensionUIContext()`) is legitimate for a render proof — `private` is compile-time only and the test is `.mjs`, so runtime access is valid and typecheck does not police it. It is inherently brittle to SDK internal renames, but that is an accepted cost of white-box render verification and is not a defect. No production coupling is introduced (the test is not shipped; `files` excludes tests).
+
+### Operability
+
+- [warning] The recorded evidence was misleading before this audit: `.planning/TRACEABILITY.md` and STATE described REQ-025 runtime evidence as green and the "Full gate passes," stated unconditionally. That is true only for the isolated-session invocation and silently false for the in-session/concurrent-job case. TRACEABILITY has been rewritten this pass to record both paths and the RED close-out gate; STATE is left for the executor (out of auditor scope) and should be corrected before any retry.
+- [info] The fix is small, test-local, and low-risk: scope the footer and empty-clear assertions to the test's own job id/name (mirroring the existing widget-line scoping), or construct the `TmuxJobManager` against a dedicated tmux session/server so `list()` cannot see sibling jobs. Either restores a hermetic, deterministic proof and additionally lets the test assert the multi-job aggregate on purpose. No production code change is required.
+
+### ASSERTED Items from TRACEABILITY.md
+
+- REQ-025 — **confirmed not PROVEN.** The evidence is located and the render path is genuinely correct, but the located proof does not reproduce green under the milestone's own close-out conditions (in-session gate exits 1, deterministically). It passes only in an isolated tmux session. Classified ASSERTED (claimed `[x]`, no _passing_ proof under close-out conditions). Not upgraded to PROVEN.
+
+### Verdict
+
+FAIL
+
+- Critical findings: 2 (non-hermetic mis-scoped assertions in `test-real-tui-status.mjs`; the configured gate `npm run check` exits 1 deterministically in the close-out / concurrent-owned-job environment)
+- Warnings: 2 (the proof under-proves the multi-job aggregate it should showcase; pre-audit records overstated the evidence as unconditionally green)
+- Info: the render proof, `requestRender` seam, resource hygiene, and private-field access are all sound; production source delta is zero and REQ-001…REQ-024 re-prove green in the isolated path
+
+This is not a production defect — the projection, monitor, UI bridge, real InteractiveMode rendering, and the `ui.requestRender` seam are all correct, and `npm run check` from a normal non-tmux shell is 12/12 green. It is a test-hermeticity defect that makes the milestone's own gate red in the exact environment where close-out executes, backed by a records claim ("Full gate passes") that is not unconditionally true. Fail-closed per the close-out brief: REQ-025 is ASSERTED (not PROVEN) and the configured gate fails in-session, so the milestone does not pass audit and must remain open. Remediation: scope `test-real-tui-status.mjs`'s footer/clear assertions to its own job identity (or isolate its tmux session), then re-run the independent close-out. `saga-audit` does not flip ROADMAP/STATE; no completion flip is authorized.
+
+---
+
+## Audit: v1.4.1-real-tui-status-proof (RE-AUDIT after repair) — 2026-07-25
+
+Auditor: Claude Opus 4.8 (`claude-opus-4-8[1m]`), independent frontier re-auditor invoked via `.planning/config.json` `close_out_auditor`. Authored no v1.1/v1.2/v1.2.1/v1.2.2/v1.3/v1.4/v1.4.1 slice. This section is a **second, independent close-out** run after the historical FAIL immediately above; that FAIL section is retained verbatim and is not rewritten.
+Scope: v1.4.1 "Real TUI status proof" — a real Pi `InteractiveMode` bridge and real tmux job proving rendered running, exited, pane-close-cleared, and monitor-stop-cleared status behavior without raw terminal startup or resource leaks (REQ-025), plus a REQ-001…REQ-024 regression sweep.
+Files reviewed: 11 files changed, 118 insertions(+), 47 deletions(-) vs the milestone-start commit `85489a3` (`git diff --shortstat`). **Production source delta is zero** — `index.ts`, all `job-*.ts`, `agent-adapters.ts`, `model-registry.ts`, `completion-notifier.ts`, `log-writer.mjs`, `workspace-manager.ts` are byte-identical to `85489a3`. The changed files are the (untracked) proof `test-real-tui-status.mjs`, its harness wiring (`scripts/test-in-tmux.sh`), `test-package.mjs`, README, version bumps to 1.4.1 (`package.json`, `extension-manifest.json`, `package-lock.json`), and the `.planning/` records. The repair the first audit demanded lives entirely in `test-real-tui-status.mjs`.
+
+Method: read STATE/ROADMAP/REQUIREMENTS/TRACEABILITY and the installed `saga-check`/`saga-audit` skills; ran `saga-check` structure lane (`run-lint.sh .`, exit 0) treating REQ-025 ASSERTED as a claim; inspected the projection (`job-status.ts`), monitor (`job-status-monitor.ts`), UI bridge (`job-status-ui.ts`), and `list()` ownership filter (`job-manager.ts:302-349`) against the repaired test; re-ran the configured gate fresh **from this owned auditor pane under the exact adverse condition the first audit exposed**. No implementation, test, package, README, ROADMAP, REQUIREMENTS, or STATE file was edited; only TRACEABILITY and this AUDIT section were written.
+
+### The adverse condition was genuinely reproduced
+
+- [info] Live tmux inspection confirms the auditor runs inside owned pane `%1448` (`@pi_tmux_job_name=v141-closeout-reaudit`, `@pi_tmux_job_id=v141-closeout-reaudit-ms0gb0o0-8c177c`, session `0`), dispatched by saga-run through the very extension under test, **and** a second concurrent owned sibling pane `%1447` (`@pi_tmux_job_name=dns-lifecycle-review`) is live in the same session. `TmuxJobManager.list()` filters on tmux session + `@pi_tmux_job_id`/`@pi_tmux_job_dir` only (`job-manager.ts:326`), independent of the test's fresh temp job root, so the test's own manager genuinely enumerates both siblings. Because the harness runs `run_tests` directly when `TMUX`/`TMUX_PANE` are set (`scripts/test-in-tmux.sh`), the anchor is `%1448` → session `0` → the in-session path. This is precisely the environment that made the first audit's gate exit 1.
+
+### Correctness — the repair is real, not cosmetic
+
+- [info] The proof remains genuine where it counts. A real `AgentSession` + `InteractiveMode` are built without `init()`/`run()` (no raw-terminal input; constructor builds a `TUI`/`ProcessTerminal` but never enters raw mode), the concrete `mode.createExtensionUIContext()` drives `startJobStatusSession`, and the test reads Pi's real `footerDataProvider`/`extensionWidgetsBelow` stores plus real `FooterComponent`/Container/Text `.render()`. Replacing `mode.ui.requestRender` with a no-op suppresses only the out-of-scope terminal byte-paint the requirement excludes; the data still lands in the real stores and the real component tree is still rendered.
+- [info] Every repair clause the brief named is present and correct:
+  - **Own-line scoping** — `jobLine(mode, name)` selects the widget line containing the test's job name; running asserts `/cmd · running · workspace=-/` (`:150`) and exited asserts `cmd · exit=0` (`:156`) on that own line, not a session-wide count.
+  - **Footer renders the published aggregate** — `footerRendersPublishedStatus(mode)` (`:74-77`) reads whatever aggregate the monitor last published into `footerDataProvider` and requires the real `FooterComponent.render()` to include it. With siblings this is the true multi-job aggregate (e.g. `tmux: 3 running`, then `tmux: 2 running · 1 exited`), so the assertion tracks reality instead of a hardcoded `1`.
+  - **Pane close preserves sibling aggregation** — after closing its own job the test waits for its own line to disappear (`:162-165`), then reads `manager.list()` and requires empty surfaces **only** when `remainingAfterClose.length === 0` (`:167-169`); otherwise it requires the footer to still render the surviving aggregate (`:171`). Removes only the test's own line; siblings keep the widget alive.
+  - **Empty UI only without siblings** — same `remainingAfterClose.length === 0` gate; the unconditional empty-surface assertion is confined to the no-sibling branch.
+  - **Monitor stop clears both surfaces** — `monitor.stop()` then asserts both `STATUS_UI_KEY` and `STATUS_WIDGET_KEY` are absent from the real stores (`:181-184`). This is a monitor invariant, not job-dependent: `JobStatusMonitor.stop()` (`job-status-monitor.ts:52-60`) unconditionally publishes `{kind:"clear"}` → `applyJobStatusUpdate` clear → `clearStatusUi` → `setStatus/setWidget(undefined)` (`job-status-ui.ts:28-37`). Correct even with siblings present.
+
+### Safety / resource hygiene
+
+- [info] The `finally` block stops the monitor, force-closes every still-open owned target, calls `mode.stop()`, `session.dispose()`, `modelRuntime.unregisterProvider(...)`, kills the tmux window, and removes the temp root — on both the pass and assertion-failure paths. No Pi/model/tmux/timer/temp leak. Reaching Pi `private` fields from a `.mjs` test is legitimate white-box render verification (runtime access is valid; typecheck does not police it) and ships nothing (`files` excludes tests).
+
+### Test Coverage — gate is now green under close-out conditions
+
+- [info] Configured gate re-run fresh from the owned auditor pane with the sibling pane visible: `npm run check` exits **0** — typecheck, all twelve suites including `real Pi InteractiveMode running, exited, closed, and stop status proof passed`, and `npm audit --omit=dev` = `found 0 vulnerabilities`. This is the invocation path that deterministically exited 1 before the repair. `saga-check` structure lane (`run-lint.sh .`) re-run fresh: exit 0, no findings.
+- [info] Underlying feature coverage is unchanged and strong: pure projection (`test-status.mjs`), monitor lifecycle (`test-status-monitor.mjs`), typed-fake UI bridge (`test-status-ui.mjs`), plus this milestone's real-InteractiveMode proof which closes the v1.4 "typed-fake only" warning — now with correctly-scoped assertions.
+- [warning] Residual, non-blocking test-robustness gap: the below-editor widget is bounded to four detail lines + overflow (`job-status.ts:69-71`), and the test keeps its own line visible by relying on the natural running-before-exited ordering rather than scoping the projection to its own job id. Under the observed close-out load (two persistent siblings, ≤3 running) the own line stays within the bound. But ≥4 concurrently-running owned siblings sorted before the test's exited job would push its line into `… +N more`, and `jobLine` would return `undefined` → the exited-phase `waitUntil` would time out. This is environment-dependent test brittleness, not a production defect, and it does not occur under the close-out conditions where the gate was reproduced green. A future hardening would pass a per-test `detailLimit`/self-scope so the own line is guaranteed visible regardless of sibling count.
+
+### Architecture Fit / Operability
+
+- [info] Production source is untouched, so the v1.1…v1.4 correctness/safety/architecture posture carries forward by construction and every prior suite re-proves green in the same run. Records are now honest: TRACEABILITY records the single reproduced green gate under the real sibling condition (no unconditional "full gate passes" overstatement), and the historical FAIL is retained for provenance.
+
+### ASSERTED Items from TRACEABILITY.md
+
+- REQ-025 — **upgraded to PROVEN.** The prior ASSERTED classification was correct at the time (no passing proof under close-out conditions). This re-audit locates the evidence and freshly reproduces it green under the exact adverse condition (owned auditor pane + a second concurrent owned sibling visible to `list()`): the gate exits 0 with the real InteractiveMode proof passing and 0 vulnerabilities. No other ASSERTED/OPEN/WAIVED items exist.
+
+### Verdict
+
+PASS
+
+- Critical findings: 0 (nothing blocks milestone closure; the two Criticals from the historical FAIL — mis-scoped assertions and the in-session gate exiting 1 — are both resolved and reproduced resolved)
+- Warnings: 1 (bounded-widget test-robustness gap: ≥4 concurrently-running owned siblings could hide the test's own exited line; environment-dependent, does not trigger under close-out, non-blocking future hardening)
+- Info: the real bridge, `requestRender` seam, own-job scoping, footer-aggregate/pane-close/monitor-stop clauses, resource hygiene, and zero production-source delta are all sound
+
+v1.4.1 passes re-audit. REQ-025 is independently PROVEN: the repaired `test-real-tui-status.mjs` scopes running/exited/close assertions to the test job's own rendered line, requires the real `FooterComponent` to render the currently-published multi-job aggregate, removes only the test's own line on pane close while preserving sibling aggregation, requires empty surfaces only when no siblings remain, and clears both surfaces on monitor stop via a code invariant — and the configured `npm run check` exits 0 from the owned auditor pane with a second concurrent owned sibling genuinely visible to `list()`, the exact condition that produced the historical FAIL. Production source delta is zero, structure lint is clean, and `npm audit` reports zero vulnerabilities. The one warning is a non-blocking test-robustness follow-up. `saga-audit` does not flip ROADMAP/STATE; the mechanical completion step remains with the executor's `saga-run` after this PASS.

@@ -66,7 +66,7 @@ try {
 	const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 	const manifest = JSON.parse(await readFile(join(packageRoot, "extension-manifest.json"), "utf8"));
 	const readme = await readFile(join(packageRoot, "README.md"), "utf8");
-	assert.equal(packageJson.version, "1.4.0");
+	assert.equal(packageJson.version, "1.4.1");
 	assert.deepEqual(packageJson.pi.extensions, ["./index.ts"]);
 	assert.equal(manifest.version, packageJson.version);
 	assert.deepEqual(manifest.provides.tools, ["tmux_job", "tmux_agent"]);
@@ -89,6 +89,8 @@ try {
 		/at most four job lines plus an explicit overflow count/,
 		/RPC, JSON, and print modes start no timer/,
 		/tmux: unavailable/,
+		/real Pi `InteractiveMode` integration test/,
+		/without starting raw terminal input/,
 		/## Non-goals/,
 	]) {
 		assert.match(readme, documented);

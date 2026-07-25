@@ -11,6 +11,7 @@ run_tests() {
   node --no-warnings --experimental-transform-types "$repo_dir/test-status.mjs"
   node --no-warnings --experimental-transform-types "$repo_dir/test-status-monitor.mjs"
   node --no-warnings --experimental-transform-types "$repo_dir/test-status-ui.mjs"
+  node --no-warnings --experimental-transform-types "$repo_dir/test-real-tui-status.mjs"
   node --no-warnings --experimental-transform-types "$repo_dir/test-notifier.mjs"
   node --no-warnings --experimental-transform-types "$repo_dir/test-live-notification.mjs"
   node --no-warnings --experimental-transform-types "$repo_dir/test-package.mjs"
