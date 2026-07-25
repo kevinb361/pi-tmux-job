@@ -3,9 +3,9 @@ saga_state_version: 1.0
 milestone: v1.4.1-real-tui-status-proof
 milestone_name: Real TUI status proof
 status: complete
-stopped_at: second CI hermeticity repair locally green; final fresh CI pending
-last_updated: "2026-07-25T14:46:08Z"
-last_activity: 2026-07-25 — Removed terminal-width dependence from live argv assertions by reading drained durable output; full local gate passes.
+stopped_at: v1.4.1 released and installed; no active milestone
+last_updated: "2026-07-25T14:54:34Z"
+last_activity: 2026-07-25 — Released v1.4.1 at CI-green commit 660627d and updated the configured local Pi package to the same SHA.
 ---
 
 # Session State
@@ -13,12 +13,12 @@ last_activity: 2026-07-25 — Removed terminal-width dependence from live argv a
 ## Current Position
 Phase/Milestone: v1.4.1-real-tui-status-proof
 Status: complete
-Last activity: 2026-07-25 — Removed terminal-width dependence from live argv assertions by reading drained durable output; full local gate passes.
+Last activity: 2026-07-25 — Released v1.4.1 at CI-green commit 660627d and updated the configured local Pi package to the same SHA.
 
 ## Active Work
-- Both discovered CI assumptions are repaired without weakening PTY or argv privacy evidence; local full gate is green.
-- Commit/push the second test-only repair and require one fresh GitHub CI success.
-- Stop/escalate if red; no tag/release/install until CI is green.
+- v1.4.1 release complete: annotated tag and GitHub release resolve to `660627d`; installed package is `1.4.1` at the same SHA and exposes `tmux_job`/`tmux_agent`.
+- Release URL: https://github.com/kevinb361/pi-tmux-job/releases/tag/v1.4.1
+- No active milestone.
 
 
 ## Deferred
