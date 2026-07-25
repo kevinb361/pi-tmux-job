@@ -64,8 +64,10 @@ const registration = extension.tools.get("tmux_job");
 assert.ok(registration, "tmux_job tool was not registered");
 const agentRegistration = extension.tools.get("tmux_agent");
 assert.ok(agentRegistration, "tmux_agent tool was not registered");
+const sessionStartHandlers = extension.handlers.get("session_start") ?? [];
+assert.equal(sessionStartHandlers.length, 1, "job status must register one session-scoped start handler");
 const shutdownHandlers = extension.handlers.get("session_shutdown") ?? [];
-assert.equal(shutdownHandlers.length, 1, "tmux_agent must register one session-scoped notifier cleanup");
+assert.equal(shutdownHandlers.length, 1, "agent notifier and job status must share one shutdown cleanup");
 
 const tool = registration.definition;
 const agentTool = agentRegistration.definition;
@@ -348,6 +350,11 @@ try {
 			assert.equal(started.details.workspace.isGit, true);
 			assert.equal(started.details.job.workspace.worktreeRoot, repoRoot);
 			assert.equal(started.details.job.workspace.intent, intent);
+			assert.deepEqual(started.details.job.agent, { backend, mode });
+			const durableAgentMetadata = JSON.parse(
+				await readFile(join(started.details.job.directory, "metadata.json"), "utf8"),
+			);
+			assert.deepEqual(durableAgentMetadata.agent, { backend, mode });
 			if (backend === "pi" && mode === "dispatch") {
 				assert.match(started.details.job.state, /launching|running/);
 			}
@@ -359,6 +366,10 @@ try {
 			}
 			const listed = await call(`list-${agentName}`, { action: "list" });
 			assert.match(listed.content[0].text, new RegExp(agentName));
+			assert.deepEqual(
+				listed.details.jobs.find((job) => job.name === agentName).agent,
+				{ backend, mode },
+			);
 			if (mode === "interactive") {
 				const stillRunning = await call(`bounded-wait-${agentName}`, {
 					action: "wait",

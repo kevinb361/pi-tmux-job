@@ -27,6 +27,9 @@ try {
 		"agent-adapters.ts",
 		"completion-notifier.ts",
 		"job-manager.ts",
+		"job-status.ts",
+		"job-status-monitor.ts",
+		"job-status-ui.ts",
 		"log-writer.mjs",
 		"model-registry.ts",
 		"workspace-manager.ts",
@@ -63,7 +66,7 @@ try {
 	const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 	const manifest = JSON.parse(await readFile(join(packageRoot, "extension-manifest.json"), "utf8"));
 	const readme = await readFile(join(packageRoot, "README.md"), "utf8");
-	assert.equal(packageJson.version, "1.3.0");
+	assert.equal(packageJson.version, "1.4.0");
 	assert.deepEqual(packageJson.pi.extensions, ["./index.ts"]);
 	assert.equal(manifest.version, packageJson.version);
 	assert.deepEqual(manifest.provides.tools, ["tmux_job", "tmux_agent"]);
@@ -81,13 +84,30 @@ try {
 		/cleanup-workspace/,
 		/preserves dirty worktrees and branches containing commits/,
 		/no force\/destructive override/,
+		/### Live job status/,
+		/below-editor widget/,
+		/at most four job lines plus an explicit overflow count/,
+		/RPC, JSON, and print modes start no timer/,
+		/tmux: unavailable/,
 		/## Non-goals/,
 	]) {
 		assert.match(readme, documented);
 	}
 
 	await mkdir(agentDirectory, { recursive: true });
-	const loaded = await discoverAndLoadExtensions([join(packageRoot, "index.ts")], repoRoot, agentDirectory);
+	const originalSetInterval = globalThis.setInterval;
+	let factoryIntervalCalls = 0;
+	globalThis.setInterval = ((...args) => {
+		factoryIntervalCalls += 1;
+		return originalSetInterval(...args);
+	});
+	let loaded;
+	try {
+		loaded = await discoverAndLoadExtensions([join(packageRoot, "index.ts")], repoRoot, agentDirectory);
+	} finally {
+		globalThis.setInterval = originalSetInterval;
+	}
+	assert.equal(factoryIntervalCalls, 0, "extension factory started a background timer");
 	assert.deepEqual(loaded.errors, []);
 	const extension = loaded.extensions.find((item) => item.path === join(packageRoot, "index.ts"));
 	assert.ok(extension, "installed extension was not discovered");
@@ -101,6 +121,8 @@ try {
 		"current",
 		"worktree",
 	]);
+	assert.equal((extension.handlers.get("session_start") ?? []).length, 1);
+	assert.equal((extension.handlers.get("session_shutdown") ?? []).length, 1);
 } finally {
 	await rm(root, { recursive: true, force: true });
 }

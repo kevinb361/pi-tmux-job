@@ -82,6 +82,17 @@ Jobs are addressed by name, generated ID, or tmux pane ID. The default window is
 
 Dispatch returns immediately and sends one bounded completion message back to the originating live Pi session. Jobs continue in tmux if Pi reloads or exits, but the old session's watcher is cancelled. Interactive mode starts the native CLI without an initial prompt; use `tmux_job send` or take over the pane directly.
 
+### Live job status
+
+In interactive TUI mode, the extension adds two quiet status surfaces without replacing Pi's footer or editor:
+
+- A footer item summarizes owned panes as running, exited, or attention-needed.
+- A below-editor widget shows active jobs first, then other open jobs, including name, agent backend/mode or generic command identity, state/exit, workspace kind, and log truncation.
+
+The widget shows at most four job lines plus an explicit overflow count. Exited jobs remain visible while their panes remain open; closing the pane removes them from the next refresh. When no owned panes exist, both surfaces disappear. Polling refreshes immediately and then once per second, never overlaps itself, and updates the UI only when the projected status changes. A polling failure shows one compact `tmux: unavailable` footer state rather than repeated notifications.
+
+Monitoring starts only from a TUI `session_start`. RPC, JSON, and print modes start no timer or tmux polling. Reload, session replacement, and shutdown cancel the session timer, clear both surfaces, and suppress late asynchronous updates.
+
 Pi model selection is validated against the live output of `pi --list-models` before launch. Use exact identifiers, for example `openai-codex/gpt-5.6-sol`, `litellm/deep`, `litellm/deep-think`, or `litellm/fast`. GPT and local LiteLLM models run through the Pi harness; this package does not launch Codex CLI.
 
 ### Workspace safety
@@ -159,7 +170,7 @@ Dispatch two writer agents with workspace=auto. Keep their changes isolated, sho
 - Tmux-native pane logging keeps commands out of a `tee` pipeline. Unlimited mode preserves the full initial-command log.
 - Operators may set `PI_TMUX_JOB_MAX_LOG_BYTES` to a positive byte count to retain only the newest chronological bytes per job; unset or `0` keeps unlimited logs. Agent tools cannot override this policy.
 - When capped output discards older bytes, job status shows `log=truncated:<bytes>`, tool results include a retention warning, and the job directory contains `log-truncated`.
-- Completed panes remain open at a shell for inspection.
+- Completed panes remain open at a shell for inspection and therefore remain represented by live TUI status until closed.
 - Each job records its command, metadata, state, exit code, and retained initial-command log under:
 
 ```text
@@ -179,6 +190,8 @@ Dispatch two writer agents with workspace=auto. Keep their changes isolated, sho
 - **Job name already exists:** close the existing owned pane or choose another name.
 - **Automatic writer launch refused as dirty:** commit or stash the requested tree, choose another clean worktree, or explicitly use `workspace=current` only when sharing that exact dirty tree is intentional.
 - **Cleanup preserved a workspace:** inspect the reported path. Commit or remove dirty changes before retrying; committed branches are intentionally retained after cleanup.
+- **Footer shows `tmux: unavailable`:** tmux polling failed. The monitor retries quietly; use `tmux_job list` for the full error if the state persists.
+- **No live status in RPC/JSON/print mode:** expected—the monitor is intentionally TUI-only and starts no background timer in non-interactive modes.
 - **Dispatch survives reload without notifying:** expected—the tmux job continues, but session-scoped watchers are cancelled on reload or shutdown. Inspect it with `tmux_job list/status/wait`.
 - **Full command output needed:** read the retained `output.log` path reported by the tool; model-facing output remains bounded. If `log-truncated` exists, output before the retained chronological tail is no longer available.
 
@@ -206,7 +219,7 @@ npm install
 npm run check
 ```
 
-The integration tests create harmless short-lived panes and temporary Git repositories. They verify start, duplicate-name rejection, waiting, output capture, input, interruption, continuously bounded logging, package installation, agent lifecycle behavior, workspace policy and concurrent-writer isolation, managed creation/rollback/cleanup preservation, exactly-once completion delivery into a real Pi AgentSession follow-up turn, and reload suppression of late notifications. When not already inside tmux, the test harness creates and removes a temporary tmux session.
+The integration tests create harmless short-lived panes and temporary Git repositories. They verify start, duplicate-name rejection, waiting, output capture, input, interruption, continuously bounded logging, package installation, agent lifecycle behavior, workspace policy and concurrent-writer isolation, managed creation/rollback/cleanup preservation, stable bounded status projection, non-overlapping TUI-only monitoring and cleanup, exactly-once completion delivery into a real Pi AgentSession follow-up turn, and reload suppression of late notifications. When not already inside tmux, the test harness creates and removes a temporary tmux session.
 
 `npm run check` audits the production package surface with `npm audit --omit=dev`. The Pi SDK packages are peer/dev dependencies used for typing and tests, not shipped runtime dependencies; assess any full-tree audit findings against the pinned upstream Pi SDK separately.
 

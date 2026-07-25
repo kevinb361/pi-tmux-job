@@ -1,24 +1,24 @@
 ---
 saga_state_version: 1.0
-milestone: v1.3-workspace-safety
-milestone_name: Workspace safety
+milestone: v1.4-job-status-widget
+milestone_name: Job status widget
 status: complete
-stopped_at: v1.3 shipped locally; independent audit PASS; commit and release are next
-last_updated: "2026-07-24T21:15:36Z"
-last_activity: 2026-07-24 — Completed v1.3 documentation/package proof and independent PASS audit with all 19 requirements PROVEN.
+stopped_at: v1.4 independently audited PASS; all 24 requirements PROVEN
+last_updated: "2026-07-25T10:32:17Z"
+last_activity: 2026-07-25 — Closed v1.4 after independent traceability and quality audit PASS.
 ---
 
 # Session State
 
 ## Current Position
-Phase/Milestone: v1.3-workspace-safety
+Phase/Milestone: v1.4-job-status-widget
 Status: complete
-Last activity: 2026-07-24 — Completed v1.3 documentation/package proof and independent PASS audit with all 19 requirements PROVEN.
+Last activity: 2026-07-25 — Closed v1.4 after independent traceability and quality audit PASS.
 
 ## Active Work
-- Completed: REQ-015 through REQ-019 and v1.3 independent audit.
-- Release state: version 1.3.0 prepared; full gate and Saga lint green; ready for final diff review, commit, push, tag, and local install.
-- Non-blocking audit follow-up: malformed self-written workspace metadata currently fails the whole job listing rather than quarantining one record.
+- Completed: REQ-020 through REQ-024 independently PROVEN; v1.4 audit PASS; ROADMAP reconciled.
+- Release state: version 1.4.0 is prepared and all gates are green; commit, push, tag, GitHub release, and local package update remain outside this drained Saga milestone.
+- Non-blocking audit follow-up: add a thin real-Pi TUI render smoke to guard future SDK UI drift.
 
 
 ## Deferred

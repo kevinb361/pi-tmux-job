@@ -243,3 +243,58 @@ Full report: `/tmp/pi-tmux-v1.3-audit.txt` (session artifact); durable verdict a
 PASS
 
 v1.3 is release-ready. No code change was requested by the auditor. The single Low robustness observation is deferred; it does not weaken workspace ownership, cleanup safety, or backward compatibility.
+
+---
+
+## Audit: v1.4-job-status-widget — 2026-07-25
+
+Auditor: Opus 4.8 (claude-opus-4-8[1m]) — independent frontier close-out context; executed no v1.4 slice.
+Scope: v1.4 Job status widget — a quiet session-scoped footer aggregate and bounded below-editor widget show live owned-job state without noisy polling output or lifecycle leaks (REQ-020 through REQ-024). Also re-swept REQ-001…REQ-019 for regression safety.
+Files reviewed: v1.4 delta vs HEAD (v1.3 release, commit c4f52cb) — 15 tracked files changed, 149 insertions(+), 29 deletions(-) — plus 6 new untracked files (3 source: `job-status.ts`, `job-status-monitor.ts`, `job-status-ui.ts`; 3 tests: `test-status.mjs`, `test-status-monitor.mjs`, `test-status-ui.mjs`). Production source delta is confined to `index.ts` (+13) and `job-manager.ts` (+40) plus the three new pure modules; `agent-adapters.ts`, `completion-notifier.ts`, `model-registry.ts`, `log-writer.mjs`, `workspace-manager.ts` are byte-identical to HEAD.
+
+Independence: confirmed. This context authored and executed no reviewed slice. `.planning/config.json` carries a non-empty `close_out_auditor` key, so the frontier-verify close-out gate is satisfiable and a non-frontier executor can perform mechanical closure after reading these certified artifacts. Saga structure lint (`run-lint.sh .`) re-run fresh: the sole pre-rewrite finding was `TRACE_DONE_OPEN` for REQ-024 — the executor's deliberate pre-audit OPEN, not a malformed spine — and it clears to exit 0 after the independent TRACEABILITY rewrite. Gate re-run fresh by the auditor: `npm run check` exit 0, confirmed via captured exit status (typecheck + all eleven in-tmux suites, incl. the three new `job-status` proofs, all passing; `npm audit --omit=dev` = `found 0 vulnerabilities`). Existing PROVEN labels and checked boxes were treated as claims and re-verified against source, tests, the real Pi SDK, and this run.
+
+### Delta character — additive, no existing path mutated
+
+- [info] The v1.4 runtime change is purely additive. `job-manager.ts` gains an optional `agent?: AgentJobMetadata` field with a strict `parseAgentMetadata` that returns `undefined` for absent metadata (historical compat) and throws only on a malformed _present_ value; it is threaded through `readJobMetadata`, `list`, and `start` alongside the existing `workspace` field using the same additive shape. `index.ts` adds a `session_start`/`session_shutdown` monitor lifecycle and passes `agent: { backend, mode }` into `manager.start`. No PTY/drain, log-writer, completion-notifier, workspace, or model-routing code path is touched, so the v1.1–v1.3 correctness/safety posture carries forward by construction — and is re-confirmed green in the fresh gate.
+
+### Correctness (REQ-020, REQ-021)
+
+- [info] REQ-020 metadata is genuinely additive and backward-compatible. `parseAgentMetadata` (`job-manager.ts:146-160`) validates `backend`/`mode` against `AGENT_BACKENDS`/`AGENT_MODES` and is symmetric with the existing workspace parser. Generic `tmux_job` jobs never carry it (`index.ts` only sets `agent` on the `tmux_agent` path). `test-manager.mjs:66-75` proves generic omission, malformed refusal (`await assert.rejects(manager.list(), /Invalid agent in job metadata/)`), and missing-field round-trip; `test-extension.mjs:353-372` proves durable + listed round-trip for every backend×mode through real tmux.
+- [info] REQ-021 projection is correct and pure. `projectJobStatus` (`job-status.ts:55-73`) sorts a copy (`[...jobs].sort`), never mutating input (asserted `test-status.mjs:54,57`); classifies running/exited/attention; orders running(0)→attention(1)→exited(2) with name→id ties; and reports every required field — name, `backend/mode` or `cmd`, `state`/`exit=<code>`, `workspace=<kind>`, `log=truncated`. Overflow is explicit (`… +N more`), correct even at `detailLimit` 0 (`… +4 more`, `test-status.mjs:66`).
+
+### Safety (REQ-022, REQ-024)
+
+- [info] The monitor cannot overlap, spam, or leak. `JobStatusMonitor` (`job-status-monitor.ts`) guards a single in-flight poll (`inFlight`), publishes only on changed `view:`/`error:` keys, bounds normalized error text to 240 chars, and enforces a 100 ms minimum cadence. Late-result and cross-session suppression rest on a `generation` counter incremented on both `start()` and `stop()` and re-checked after each `await`, so a poll resolving after stop/reload is discarded (`test-status-monitor.mjs:98-112`). This is a code invariant, not a timing race.
+- [info] No background resource starts from the extension factory (REQ-024 core clause). The factory body only registers handlers/tools; `setInterval` is reachable only inside `monitor.start()`, itself reachable only from a TUI `session_start`. `test-package.mjs:107-116` wraps `discoverAndLoadExtensions` and asserts `factoryIntervalCalls === 0` — a real resource-leak check over the packed extension.
+- [info] Non-TUI modes are inert. `startJobStatusSession` returns `undefined` for `ctx.mode !== "tui"` (`job-status-ui.ts:56`), so RPC/JSON/print start no timer, no `manager.list()` polling, and touch no UI surface — proven end-to-end by `test-status-ui.mjs:48-63` (no schedule, no list call, empty status/widget arrays).
+- [info] No new model-reachable or destructive surface. The status feature is a read-only projection of `manager.list()`; the three modules contain no `exec`/`spawn`/`rm`/`unlink`/`registerTool`/`notify`/`sendMessage` (grep-confirmed). UI output is bounded (≤4 detail lines + overflow, 240-char errors) and lives on footer/widget surfaces, not model-facing tool output — so no unbounded model output and no noisy notifications are introduced.
+
+### Test Coverage
+
+- [info] Coverage is strong and behavior-oriented across three layers. Pure projection: `test-status.mjs` (12 cases incl. immutability, reorder-invariance, overflow at limits 2 and 0). Monitor lifecycle: `test-status-monitor.mjs` drives a fake scheduler + deferred promises through min-interval, immediate/idempotent start, overlap suppression, view dedup, identical-error dedup, recovery republish, cancel/clear, and post-stop late-result + dead-callback suppression. UI bridge: `test-status-ui.mjs` proves non-TUI inertness, exact themed `setStatus`/`setWidget(belowEditor)` calls, active-first content, empty/error clearing, and timer cancellation. `test-extension.mjs` adds real-extension handler-count assertions.
+- [warning] The real-Pi TUI rendering surface (`ctx.ui.setStatus`/`setWidget`) is exercised only against a locally-declared `JobStatusUiContext` fake, not a live Pi TUI session. I independently mitigated this by inspecting the pinned Pi SDK 0.81.1: the `session_start (_event, ctx)` signature, `ctx.mode` enum, and `setStatus`/`setWidget(key, lines, { placement: "belowEditor" })`/`theme.fg` API all match the bridge exactly (`docs/extensions.md`, `docs/tui.md`, `docs/rpc.md`). Risk is low and the contract is confirmed by inspection, but there is no automated guard against a future Pi UI-API drift. Non-blocking follow-up: a thin real-`AgentSession` TUI-mode smoke (analogous to `test-live-notification.mjs`) would close it.
+
+### Architecture Fit
+
+- [info] Clean separation with correct dependency direction: `job-status.ts` (pure, type-only import of `TmuxPaneJob`) ← `job-status-monitor.ts` (scheduling/dedup, injectable scheduler) ← `job-status-ui.ts` (Pi bridge) ← `index.ts` (wiring). No circular dependencies; the monitor is fully testable via injected `schedule`/`cancel`/`project`. The `agent` metadata mirrors the established `workspace` metadata pattern rather than inventing a new one. Good fit.
+- [info] The single shared `session_shutdown` handler cleans up both the notifier and the status monitor (`index.ts:99-103`), and `session_start` replaces any prior monitor before starting a fresh one — correct handling of session replacement (`new`/`resume`/`fork`) with no handler accumulation, asserted by the one-handler counts in `test-extension.mjs` and `test-package.mjs`.
+
+### Operability
+
+- [info] Debuggability is preserved and extended. Exited jobs remain listed until their pane closes (`job-manager.ts:255-257` execs a login shell after the command), so the widget accurately reflects inspectable panes. A polling failure degrades to a single quiet `tmux: unavailable` footer state with a README troubleshooting entry pointing at `tmux_job list` for the full error. README documents the TUI-only scope, the four-line+overflow bound, cadence, and non-TUI no-timer behavior.
+- [info] Working-tree state: the milestone is uncommitted (additive source/tests + version/doc/planning edits in the working tree, no new commit). Expected for a pre-close-out milestone; commit at or before the ROADMAP/STATE flip so shipped state lands in history. Not a defect.
+
+### ASSERTED Items from TRACEABILITY.md
+
+- None. The independent sweep classifies REQ-001…REQ-024 as PROVEN with located, freshly reproduced evidence. There are no ASSERTED, OPEN, or WAIVED items to adjudicate. The pre-audit REQ-024 OPEN (a deliberate executor placeholder pending this audit) is now PROVEN: packaging is consistent at 1.4.0, all three status modules are packed, the factory-timer leak check passes, the README contract holds, and this independent audit returns PASS.
+
+### Verdict
+
+PASS
+
+- Critical findings: 0 (nothing blocks milestone closure)
+- Warnings: 1 (real-Pi TUI render surface exercised only against a locally-typed fake; the Pi SDK 0.81.1 contract was confirmed by direct inspection, so risk is low — a real-session TUI smoke is the non-blocking follow-up)
+- Info: correctness/safety/architecture/operability notes on the additive delta, pure projection, generation-based leak safety, factory no-timer proof, non-TUI inertness, and dependency structure
+
+v1.4 is closure-ready. Every new requirement (REQ-020 additive backend/mode metadata, REQ-021 stable bounded projection, REQ-022 non-overlapping leak-free monitor, REQ-023 non-replacing footer/widget integration, REQ-024 documented/packaged/regression-proven) is independently PROVEN with located, freshly reproduced evidence; the production delta is additive-only and every prior REQ-001…REQ-019 regression suite passes clean with zero vulnerabilities; the monitor's overlap/late-result/leak guarantees are code invariants proven by a fake-scheduler suite; the extension factory starts no background timer and non-TUI modes are inert; and the real Pi SDK UI/event contract matches the bridge by inspection. The single warning is a test-surface gap over a contract confirmed by inspection, not a defect. `saga-audit` does not flip ROADMAP/STATE; the mechanical completion step remains with the executor's `saga-run` after this PASS.

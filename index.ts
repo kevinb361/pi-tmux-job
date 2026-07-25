@@ -17,6 +17,7 @@ import {
 } from "./agent-adapters.ts";
 import { DispatchCompletionNotifier } from "./completion-notifier.ts";
 import { TmuxJobManager, type TmuxPaneJob } from "./job-manager.ts";
+import { startJobStatusSession } from "./job-status-ui.ts";
 import { validatePiModel } from "./model-registry.ts";
 import {
 	WORKSPACE_INTENTS,
@@ -93,7 +94,16 @@ export default function (pi: ExtensionAPI) {
 	const workspaceAllocator = new WorkspaceAllocator();
 	const managedWorkspaces = new ManagedWorkspaceManager(exec);
 	const notifier = new DispatchCompletionNotifier(manager, (message, options) => pi.sendMessage(message, options));
-	pi.on("session_shutdown", () => notifier.shutdown());
+	let statusMonitor: ReturnType<typeof startJobStatusSession>;
+	pi.on("session_start", (_event, ctx) => {
+		statusMonitor?.stop();
+		statusMonitor = startJobStatusSession(ctx, () => manager.list());
+	});
+	pi.on("session_shutdown", () => {
+		notifier.shutdown();
+		statusMonitor?.stop();
+		statusMonitor = undefined;
+	});
 
 	pi.registerTool({
 		name: "tmux_job",
@@ -368,6 +378,7 @@ export default function (pi: ExtensionAPI) {
 						windowName: params.window,
 						input: mode === "dispatch" ? params.prompt : undefined,
 						workspace,
+						agent: { backend: params.backend, mode },
 						signal,
 					});
 					return { job, workspace, decision };

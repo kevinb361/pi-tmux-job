@@ -3,6 +3,12 @@ import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	AGENT_BACKENDS,
+	AGENT_MODES,
+	type AgentBackend,
+	type AgentMode,
+} from "./agent-adapters.ts";
 import { WORKSPACE_INTENTS, WORKSPACE_MODES, type JobWorkspaceMetadata } from "./workspace-manager.ts";
 
 export interface ExecResult {
@@ -18,6 +24,11 @@ export type ExecFunction = (
 	options?: { signal?: AbortSignal; timeout?: number; cwd?: string },
 ) => Promise<ExecResult>;
 
+export interface AgentJobMetadata {
+	backend: AgentBackend;
+	mode: AgentMode;
+}
+
 export interface TmuxPaneJob {
 	sessionId: string;
 	windowId: string;
@@ -31,6 +42,7 @@ export interface TmuxPaneJob {
 	maxLogBytes: number;
 	logTruncated: boolean;
 	workspace?: JobWorkspaceMetadata;
+	agent?: AgentJobMetadata;
 	exitCode?: number;
 }
 
@@ -41,6 +53,7 @@ export interface StartJobOptions {
 	windowName?: string;
 	input?: string;
 	workspace?: JobWorkspaceMetadata;
+	agent?: AgentJobMetadata;
 	signal?: AbortSignal;
 }
 
@@ -130,9 +143,24 @@ function parseWorkspaceMetadata(value: unknown, path: string): JobWorkspaceMetad
 	return workspace as unknown as JobWorkspaceMetadata;
 }
 
+function parseAgentMetadata(value: unknown, path: string): AgentJobMetadata | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "object" || value === null) {
+		throw new Error(`Invalid agent in job metadata at ${path}`);
+	}
+	const agent = value as Record<string, unknown>;
+	if (
+		!AGENT_BACKENDS.includes(agent.backend as AgentBackend) ||
+		!AGENT_MODES.includes(agent.mode as AgentMode)
+	) {
+		throw new Error(`Invalid agent in job metadata at ${path}`);
+	}
+	return agent as unknown as AgentJobMetadata;
+}
+
 async function readJobMetadata(
 	directory: string,
-): Promise<{ maxLogBytes: number; workspace?: JobWorkspaceMetadata }> {
+): Promise<{ maxLogBytes: number; workspace?: JobWorkspaceMetadata; agent?: AgentJobMetadata }> {
 	const path = resolve(directory, "metadata.json");
 	const raw = await readOptional(path);
 	if (raw === undefined) return { maxLogBytes: 0 };
@@ -142,12 +170,16 @@ async function readJobMetadata(
 	} catch (error) {
 		throw new Error(`Invalid job metadata at ${path}: ${error instanceof Error ? error.message : String(error)}`);
 	}
-	const record = metadata as { maxLogBytes?: unknown; workspace?: unknown };
+	const record = metadata as { maxLogBytes?: unknown; workspace?: unknown; agent?: unknown };
 	const maxLogBytes = record.maxLogBytes ?? 0;
 	if (typeof maxLogBytes !== "number" || !Number.isSafeInteger(maxLogBytes) || maxLogBytes < 0) {
 		throw new Error(`Invalid maxLogBytes in job metadata at ${path}`);
 	}
-	return { maxLogBytes, workspace: parseWorkspaceMetadata(record.workspace, path) };
+	return {
+		maxLogBytes,
+		workspace: parseWorkspaceMetadata(record.workspace, path),
+		agent: parseAgentMetadata(record.agent, path),
+	};
 }
 
 function runnerScript(
@@ -309,6 +341,7 @@ export class TmuxJobManager {
 				maxLogBytes: metadata.maxLogBytes,
 				logTruncated,
 				workspace: metadata.workspace,
+				agent: metadata.agent,
 				exitCode: rawExit === undefined ? undefined : parseExitCode(rawExit),
 			});
 		}
@@ -368,6 +401,7 @@ export class TmuxJobManager {
 					windowName,
 					maxLogBytes,
 					workspace: options.workspace,
+					agent: options.agent,
 					createdAt: new Date().toISOString(),
 				},
 				null,

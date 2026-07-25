@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TmuxJobManager } from "./job-manager.ts";
@@ -63,6 +63,16 @@ try {
 	cleanupTargets.push(completed.paneId);
 	assert.equal(completed.name, completedName);
 	assert.match(completed.paneId, /^%\d+$/);
+	assert.equal(completed.agent, undefined);
+	const genericMetadataPath = join(completed.directory, "metadata.json");
+	const genericMetadata = JSON.parse(await readFile(genericMetadataPath, "utf8"));
+	assert.equal(genericMetadata.agent, undefined);
+	genericMetadata.agent = { backend: "unknown", mode: "dispatch" };
+	await writeFile(genericMetadataPath, `${JSON.stringify(genericMetadata)}\n`);
+	await assert.rejects(manager.list(), /Invalid agent in job metadata/);
+	delete genericMetadata.agent;
+	await writeFile(genericMetadataPath, `${JSON.stringify(genericMetadata)}\n`);
+	assert.equal((await manager.resolve(completedName)).agent, undefined);
 
 	const unownedResult = await exec("tmux", [
 		"split-window",

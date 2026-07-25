@@ -1,8 +1,8 @@
 {
   "id": "tmux-job",
   "name": "tmux Job and Agent Runner",
-  "version": "1.3.0",
-  "description": "Runs observable commands and workspace-safe child agents in Pi-owned tmux panes.",
+  "version": "1.4.0",
+  "description": "Runs observable commands and workspace-safe child agents with live Pi TUI status.",
   "tier": "community",
   "requires": {
     "platform": ">=0.80.0"
