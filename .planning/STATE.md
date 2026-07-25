@@ -3,9 +3,9 @@ saga_state_version: 1.0
 milestone: v1.5-parent-scoped-status
 milestone_name: Parent-scoped quiet status
 status: complete
-stopped_at: v1.5 independently re-audited PASS; release hygiene remains separate
-last_updated: "2026-07-25T18:50:00Z"
-last_activity: 2026-07-25 — v1.5 passed independent re-audit and mandatory final review; package identity is 1.5.0 and delivery was explicitly approved.
+stopped_at: v1.5.0 committed, pushed, and installed; no active milestone
+last_updated: "2026-07-25T18:59:53Z"
+last_activity: 2026-07-25 — Committed and pushed v1.5.0 code at 12652a8, then installed the documented GitHub package source and verified version 1.5.0.
 ---
 
 # Session State
@@ -13,12 +13,13 @@ last_activity: 2026-07-25 — v1.5 passed independent re-audit and mandatory fin
 ## Current Position
 Phase/Milestone: v1.5-parent-scoped-status
 Status: complete
-Last activity: 2026-07-25 — Independent re-audit returned PASS; ROADMAP completion marker reconciled.
+Last activity: 2026-07-25 — v1.5.0 code commit 12652a8 is pushed and the global GitHub package source reports version 1.5.0.
 
 ## Active Work
-v1.5 delivery is complete in the repository: parent-scoped quiet status and non-destructive acknowledgment are independently PROVEN, package identity consistently reports 1.5.0, and the mandatory final diff/doc review returned PASS.
-Fresh `npm run check` passes all twelve suites with 0 vulnerabilities; Saga lint and `git diff --check` pass. The approved auditor artifact cleanup is complete and the tree has no untracked files.
-Commit, push, and documented GitHub installation were explicitly approved by the operator.
+- v1.5.0 delivery complete: parent-scoped quiet status and non-destructive acknowledgment are independently PROVEN; mandatory final diff/doc review returned PASS; code commit `12652a8` is pushed to `origin/main`.
+- Fresh `npm run check` passed all twelve suites with 0 vulnerabilities; Saga lint and `git diff --check` passed.
+- `pi install git:github.com/kevinb361/pi-tmux-job` completed successfully; `pi list` resolves the global package to this checkout and package identity reports `1.5.0`.
+- No active milestone.
 
 
 ## Deferred
