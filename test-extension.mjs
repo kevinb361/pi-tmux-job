@@ -417,12 +417,15 @@ try {
 				assert.match(agentText, new RegExp(`fake-args=<--oneshot><${prompt}>`));
 			}
 			if (mode === "dispatch") {
-				const liveArgvLine = agentText.split("\n").find((line) => line.startsWith("fake-live-argv="));
+				const directory = started.details.job.directory;
+				const durableAgentText = await readFile(join(directory, "output.log"), "utf8");
+				const liveArgvLine = durableAgentText
+					.split("\n")
+					.find((line) => line.startsWith("fake-live-argv="));
 				assert.ok(liveArgvLine, "fake agent did not report live argv");
 				if (backend === "hermes") assert.match(liveArgvLine, new RegExp(prompt));
 				else assert.doesNotMatch(liveArgvLine, new RegExp(prompt));
 
-				const directory = started.details.job.directory;
 				assert.equal(await readFile(join(directory, "input.txt"), "utf8"), prompt);
 				assert.equal((await stat(join(directory, "input.txt"))).mode & 0o777, 0o600);
 				for (const artifact of ["command.sh", "metadata.json"]) {

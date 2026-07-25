@@ -3,9 +3,9 @@ saga_state_version: 1.0
 milestone: v1.4.1-real-tui-status-proof
 milestone_name: Real TUI status proof
 status: complete
-stopped_at: REQ-012 CI capture repair locally green; commit/push and fresh CI in progress
-last_updated: "2026-07-25T14:42:34Z"
-last_activity: 2026-07-25 — Moved the genuine-TTY marker into the retained tail and proved it in durable log plus pane capture with the full local gate green.
+stopped_at: second CI hermeticity repair locally green; final fresh CI pending
+last_updated: "2026-07-25T14:46:08Z"
+last_activity: 2026-07-25 — Removed terminal-width dependence from live argv assertions by reading drained durable output; full local gate passes.
 ---
 
 # Session State
@@ -13,12 +13,12 @@ last_activity: 2026-07-25 — Moved the genuine-TTY marker into the retained tai
 ## Current Position
 Phase/Milestone: v1.4.1-real-tui-status-proof
 Status: complete
-Last activity: 2026-07-25 — Moved the genuine-TTY marker into the retained tail and proved it in durable log plus pane capture with the full local gate green.
+Last activity: 2026-07-25 — Removed terminal-width dependence from live argv assertions by reading drained durable output; full local gate passes.
 
 ## Active Work
-- REQ-012 CI repair is local-gate green and ready to commit/push.
-- Fresh GitHub Actions success remains required before v1.4.1 tag/release/install.
-- No release artifact or installed-extension mutation has occurred.
+- Both discovered CI assumptions are repaired without weakening PTY or argv privacy evidence; local full gate is green.
+- Commit/push the second test-only repair and require one fresh GitHub CI success.
+- Stop/escalate if red; no tag/release/install until CI is green.
 
 
 ## Deferred
