@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFileSync, statSync } from "node:fs";
+import { chmod, mkdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,6 +67,17 @@ const DEFAULT_WINDOW_NAME = "pi-jobs";
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const WINDOW_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,31}$/;
 const DEFAULT_LOG_WRITER_PATH = fileURLToPath(new URL("./log-writer.mjs", import.meta.url));
+const PANE_LIST_FORMAT = [
+	"#{session_id}",
+	"#{window_id}",
+	"#{pane_id}",
+	"#{pane_title}",
+	"#{pane_current_command}",
+	"#{@pi_tmux_job_id}",
+	"#{@pi_tmux_job_name}",
+	"#{@pi_tmux_job_dir}",
+	"#{@pi_tmux_job_origin}",
+].join(FIELD_SEPARATOR);
 
 function assertSafeName(value: string, kind: "job" | "window"): void {
 	const pattern = kind === "job" ? NAME_PATTERN : WINDOW_PATTERN;
@@ -99,18 +111,18 @@ function parseMaxLogBytes(value: string | number | undefined): number {
 	return parsed;
 }
 
-async function readOptional(path: string): Promise<string | undefined> {
+function readOptional(path: string): string | undefined {
 	try {
-		return (await readFile(path, "utf8")).trim();
+		return readFileSync(path, "utf8").trim();
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
 		throw error;
 	}
 }
 
-async function optionalMtime(path: string): Promise<number | undefined> {
+function optionalMtime(path: string): number | undefined {
 	try {
-		return (await stat(path)).mtimeMs;
+		return statSync(path).mtimeMs;
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
 		throw error;
@@ -170,12 +182,63 @@ function parseAgentMetadata(value: unknown, path: string): AgentJobMetadata | un
 	return agent as unknown as AgentJobMetadata;
 }
 
-async function readJobMetadata(
+interface ParsedJobMetadata {
+	maxLogBytes: number;
+	workspace?: JobWorkspaceMetadata;
+	agent?: AgentJobMetadata;
+}
+
+interface CachedJobMetadata {
+	signature: string | undefined;
+	parsed: ParsedJobMetadata;
+}
+
+interface JobRecordPaths {
+	state: string;
+	exitCode: string;
+	metadata: string;
+	logTruncated: string;
+	acknowledged: string;
+}
+
+function jobRecordPaths(directory: string, cache: Map<string, JobRecordPaths>): JobRecordPaths {
+	const cached = cache.get(directory);
+	if (cached !== undefined) return cached;
+	const paths = {
+		state: resolve(directory, "state"),
+		exitCode: resolve(directory, "exit-code"),
+		metadata: resolve(directory, "metadata.json"),
+		logTruncated: resolve(directory, "log-truncated"),
+		acknowledged: resolve(directory, "acknowledged"),
+	};
+	cache.set(directory, paths);
+	return paths;
+}
+
+function metadataSignature(path: string): string | undefined {
+	try {
+		const value = statSync(path, { bigint: true });
+		return `${value.dev}:${value.ino}:${value.size}:${value.mtimeNs}:${value.ctimeNs}`;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
+function readJobMetadata(
 	directory: string,
-): Promise<{ maxLogBytes: number; workspace?: JobWorkspaceMetadata; agent?: AgentJobMetadata }> {
-	const path = resolve(directory, "metadata.json");
-	const raw = await readOptional(path);
-	if (raw === undefined) return { maxLogBytes: 0 };
+	path: string,
+	cache: Map<string, CachedJobMetadata>,
+): ParsedJobMetadata {
+	const signature = metadataSignature(path);
+	const cached = cache.get(directory);
+	if (cached !== undefined && cached.signature === signature) return cached.parsed;
+	const raw = readOptional(path);
+	if (raw === undefined) {
+		const parsed: ParsedJobMetadata = { maxLogBytes: 0 };
+		cache.set(directory, { signature: undefined, parsed });
+		return parsed;
+	}
 	let metadata: unknown;
 	try {
 		metadata = JSON.parse(raw);
@@ -187,11 +250,13 @@ async function readJobMetadata(
 	if (typeof maxLogBytes !== "number" || !Number.isSafeInteger(maxLogBytes) || maxLogBytes < 0) {
 		throw new Error(`Invalid maxLogBytes in job metadata at ${path}`);
 	}
-	return {
+	const parsed: ParsedJobMetadata = {
 		maxLogBytes,
 		workspace: parseWorkspaceMetadata(record.workspace, path),
 		agent: parseAgentMetadata(record.agent, path),
 	};
+	cache.set(directory, { signature, parsed });
+	return parsed;
 }
 
 function runnerScript(
@@ -275,6 +340,8 @@ export class TmuxJobManager {
 	private readonly anchorPane: string;
 	private readonly maxLogBytesSetting: string | number | undefined;
 	private readonly logWriterPath: string;
+	private readonly metadataCache = new Map<string, CachedJobMetadata>();
+	private readonly recordPathsCache = new Map<string, JobRecordPaths>();
 
 	constructor(
 		private readonly exec: ExecFunction,
@@ -317,56 +384,52 @@ export class TmuxJobManager {
 
 	async list(signal?: AbortSignal): Promise<TmuxPaneJob[]> {
 		const sessionId = await this.ensureAvailable(signal);
-		const format = [
-			"#{session_id}",
-			"#{window_id}",
-			"#{pane_id}",
-			"#{pane_title}",
-			"#{pane_current_command}",
-			"#{@pi_tmux_job_id}",
-			"#{@pi_tmux_job_name}",
-			"#{@pi_tmux_job_dir}",
-			"#{@pi_tmux_job_origin}",
-		].join(FIELD_SEPARATOR);
-		const result = await this.exec("tmux", ["list-panes", "-a", "-F", format], {
+		const result = await this.exec("tmux", ["list-panes", "-a", "-F", PANE_LIST_FORMAT], {
 			signal,
 			timeout: 5000,
 		});
 		if (result.code !== 0) throw new Error(`Unable to list tmux panes: ${result.stderr.trim()}`);
 
-		const jobs: TmuxPaneJob[] = [];
-		for (const line of result.stdout.split("\n")) {
-			if (!line) continue;
-			const [rowSession, windowId, paneId, title, currentCommand, id, name, directory, originPane] =
-				line.split(FIELD_SEPARATOR);
-			if (rowSession !== sessionId || !id || !directory) continue;
-			const state = (await readOptional(resolve(directory, "state"))) ?? "unknown";
-			const exitPath = resolve(directory, "exit-code");
-			const rawExit = await readOptional(exitPath);
-			const metadata = await readJobMetadata(directory);
-			const logTruncated = (await readOptional(resolve(directory, "log-truncated"))) === "true";
-			const acknowledged = (await readOptional(resolve(directory, "acknowledged"))) !== undefined;
-			jobs.push({
-				sessionId: rowSession,
-				windowId,
-				paneId,
-				title,
-				currentCommand,
-				id,
-				name,
-				directory,
-				state,
-				maxLogBytes: metadata.maxLogBytes,
-				logTruncated,
-				originPane: originPane || undefined,
-				acknowledged,
-				completedAt: rawExit === undefined ? undefined : await optionalMtime(exitPath),
-				workspace: metadata.workspace,
-				agent: metadata.agent,
-				exitCode: rawExit === undefined ? undefined : parseExitCode(rawExit),
-			});
-		}
-		return jobs;
+		if (this.metadataCache.size > 1024) this.metadataCache.clear();
+		if (this.recordPathsCache.size > 1024) this.recordPathsCache.clear();
+		const paneRows = result.stdout
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => line.split(FIELD_SEPARATOR))
+			.filter(([rowSession, , , , , id, , directory]) => rowSession === sessionId && id && directory);
+
+		return paneRows.map(
+			([rowSession, windowId, paneId, title, currentCommand, id, name, directory, originPane]) => {
+				const paths = jobRecordPaths(directory, this.recordPathsCache);
+				const state = readOptional(paths.state) ?? "unknown";
+				const rawExit = state === "launching" || state === "running"
+					? undefined
+					: readOptional(paths.exitCode);
+				const metadata = readJobMetadata(directory, paths.metadata, this.metadataCache);
+				const rawLogTruncated = metadata.maxLogBytes > 0
+					? readOptional(paths.logTruncated)
+					: undefined;
+				return {
+					sessionId: rowSession,
+					windowId,
+					paneId,
+					title,
+					currentCommand,
+					id,
+					name,
+					directory,
+					state,
+					maxLogBytes: metadata.maxLogBytes,
+					logTruncated: rawLogTruncated === "true",
+					originPane: originPane || undefined,
+					acknowledged: readOptional(paths.acknowledged) !== undefined,
+					completedAt: rawExit === undefined ? undefined : optionalMtime(paths.exitCode),
+					workspace: metadata.workspace,
+					agent: metadata.agent,
+					exitCode: rawExit === undefined ? undefined : parseExitCode(rawExit),
+				};
+			},
+		);
 	}
 
 	async start(options: StartJobOptions): Promise<TmuxPaneJob> {
